@@ -34,6 +34,11 @@ app.add_middleware(
 app.include_router(rest_router)
 app.include_router(ws_router)
 
+# Generated media (生图/语音) — mounted before the SPA catch-all so /media wins.
+_MEDIA_DIR = Path(__file__).resolve().parent / "media"
+_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=_MEDIA_DIR), name="media")
+
 # Serve built frontend at / if present; tolerate absence (API-only runs).
 if _FRONTEND_DIST.is_dir():
     app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="static")

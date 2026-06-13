@@ -1,0 +1,150 @@
+{
+  "_meta": {
+    "purpose": "权威角色外观注册表 — 生图唯一可信的发色/瞳色/外观来源。禁止从模型记忆臆造。",
+    "rule": "生成任何角色前必须在此查到核实条目；查不到 = fail-closed 拒绝生成，先用 verify_character 核实并登记。",
+    "updated": "2026-06-14"
+  },
+  "characters": {
+    "莉音": {
+      "canonical": "調月リオ / Tsukatsuki Rio",
+      "aliases": [
+        "莉音",
+        "rio",
+        "Rio",
+        "調月リオ",
+        "tsukatsuki rio",
+        "rio (blue archive)",
+        "リオ",
+        "调月リオ",
+        "调月",
+        "调月rio",
+        "tsukatsuki rio (blue archive)"
+      ],
+      "source": "Blue Archive 蔚蓝档案",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "tsukatsuki rio, rio (blue archive)",
+      "appearance": "black hair, very long hair, blunt bangs, red eyes, fair skin",
+      "outfit": "black blazer, white turtleneck sweater, black pleated skirt, black pantyhose, halo",
+      "wrong_color_negatives": "white hair, silver hair, grey hair, blonde hair, blue hair, blue eyes, purple eyes, green eyes",
+      "source_urls": [
+        "https://bluearchive.fandom.com/wiki/Tsukatsuki_Rio"
+      ],
+      "verified": "2026-06-14",
+      "notes": "底模 oneObsession 已能出其脸/形；务必 black hair + red eyes；负向严禁放 dark hair。曾被误生成银白发蓝眼。"
+    },
+    "月城优月": {
+      "canonical": "月城優月 / Tsukishiro Yuuki (用户OC)",
+      "aliases": [
+        "月城优月",
+        "月城優月",
+        "优月",
+        "優月",
+        "月城",
+        "tsukishiro yuuki",
+        "yuuki tsukishiro"
+      ],
+      "source": "用户原创OC(COTE同人,无公开ref;外观权威=用户定义)",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "",
+      "appearance": "1boy, male, short messy blonde hair, red eyes, boyish slender build, flat chest",
+      "outfit": "school uniform",
+      "wrong_color_negatives": "1girl, female, woman, breasts, androgynous, silver hair, black hair, blue eyes",
+      "source_urls": [],
+      "verified": "2026-06-14",
+      "notes": "用户OC,无公开来源,外观权威=用户定义。无LoRA:oneObsession偏女性,出图须配 yousuke_hirata_ilxl@0.20 男性bias;prompt绝不写androgynous(会召女性)。性格:冷酷操控欲强。详见 comfyui skill references/no-lora-male-character-bias-fix.md。"
+    },
+    "菲比": {
+      "canonical": "Phoebe / 菲比 (Wuthering Waves 鸣潮)",
+      "aliases": [
+        "菲比",
+        "phoebe",
+        "Phoebe",
+        "phoebe (wuthering waves)",
+        "phoebe marino",
+        "phoebe \\(wuthering waves\\)"
+      ],
+      "source": "Wuthering Waves 鸣潮",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "phoebe (wuthering waves)",
+      "appearance": "blonde hair, very long hair, purple eyes, fair skin",
+      "outfit": "white wide-brimmed hat, hair flower, white dress, white capelet, black high-neck top, blue accents",
+      "wrong_color_negatives": "white hair, silver hair, grey hair, brown hair, black hair, pink hair, blue eyes, red eyes, green eyes",
+      "source_urls": [
+        "https://wutheringwaves.fandom.com/wiki/Phoebe"
+      ],
+      "verified": "2026-06-14",
+      "notes": "用户2026-06-14确认 SFW 测试图(金发紫眼白宽檐帽白裙)。底模 oneObsession 认识她;勿写 nun habit,是白宽檐帽+白裙。"
+    },
+    "克洛琳德": {
+      "canonical": "Clorinde 克洛琳德 (Genshin Impact 原神)",
+      "aliases": [
+        "克洛琳德",
+        "clorinde",
+        "Clorinde",
+        "clorinde (genshin impact)",
+        "clorinde \\(genshin impact\\)"
+      ],
+      "source": "Genshin Impact 原神",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "clorinde (genshin impact)",
+      "appearance": "dark blue hair, long hair, low ponytail, purple eyes, pale skin",
+      "outfit": "white naval uniform, hat, gloves",
+      "wrong_color_negatives": "blonde hair, white hair, silver hair, pink hair, brown hair, red eyes, blue eyes, green eyes, yellow eyes",
+      "source_urls": [
+        "https://genshin-impact.fandom.com/wiki/Clorinde"
+      ],
+      "verified": "2026-06-14",
+      "notes": "外貌取自 meihei skill 已验证模板(用户验证)。"
+    },
+    "千织": {
+      "canonical": "Chiori 千织 (Genshin Impact 原神)",
+      "aliases": [
+        "千织",
+        "chiori",
+        "Chiori",
+        "chiori (genshin impact)",
+        "chiori \\(genshin impact\\)"
+      ],
+      "source": "Genshin Impact 原神",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "chiori (genshin impact)",
+      "appearance": "multicolored hair, long brown hair, blonde hair, red eyes, pale skin",
+      "outfit": "kimono, obi, sash, japanese clothes, hair ornament, hair stick",
+      "wrong_color_negatives": "white hair, silver hair, blue hair, pink hair, blue eyes, green eyes, purple eyes",
+      "source_urls": [
+        "https://genshin-impact.fandom.com/wiki/Chiori"
+      ],
+      "verified": "2026-06-14",
+      "notes": "外貌取自 meihei skill 已验证模板(用户验证)。多色发:棕+后挑染金。"
+    },
+    "阿蕾奇诺": {
+      "canonical": "Arlecchino 阿蕾奇诺/仆人 (Genshin Impact 原神)",
+      "aliases": [
+        "阿蕾奇诺",
+        "仆人",
+        "arlecchino",
+        "Arlecchino",
+        "arlecchino (genshin impact)",
+        "arlecchino \\(genshin impact\\)",
+        "the knave"
+      ],
+      "source": "Genshin Impact 原神",
+      "has_lora": false,
+      "lora_file": null,
+      "trigger": "arlecchino (genshin impact)",
+      "appearance": "white hair, long hair, black hair tips, red eyes, x-shaped pupils, pale skin",
+      "outfit": "black gloves, white jacket, suit, black pants, open jacket",
+      "wrong_color_negatives": "blonde hair, brown hair, pink hair, blue hair, blue eyes, green eyes, purple eyes, yellow eyes",
+      "source_urls": [
+        "https://genshin-impact.fandom.com/wiki/Arlecchino"
+      ],
+      "verified": "2026-06-14",
+      "notes": "外貌取自 meihei skill 已验证模板(用户验证)。白发黑发梢+红瞳X瞳孔;白发是对的勿放负向。"
+    }
+  }
+}
