@@ -22,6 +22,7 @@ export interface Room {
   name: string;
   owner_id: string;
   ai_mode: AiMode;
+  world_card?: string | null;
   members: RoomMember[];
 }
 

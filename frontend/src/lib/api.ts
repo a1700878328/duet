@@ -104,8 +104,11 @@ export const api = {
 
   listRooms: () => request<Room[]>("/rooms"),
 
-  createRoom: (body: { name: string; character_name: string }) =>
-    request<Room>("/rooms", { method: "POST", body: JSON.stringify(body) }),
+  createRoom: (body: {
+    name: string;
+    character_name: string;
+    world_card?: string | null;
+  }) => request<Room>("/rooms", { method: "POST", body: JSON.stringify(body) }),
 
   joinRoom: (id: string, body: { character_name: string }) =>
     request<Room>(`/rooms/${id}/join`, {

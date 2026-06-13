@@ -97,7 +97,12 @@ async def list_rooms(user: CurrentUser, session: SessionDep) -> list[RoomOut]:
 async def create_room(
     body: RoomCreateIn, user: CurrentUser, session: SessionDep
 ) -> RoomOut:
-    room = Room(name=body.name, owner_id=user.id, ai_mode="manual")
+    room = Room(
+        name=body.name,
+        owner_id=user.id,
+        ai_mode="manual",
+        world_card=body.world_card,
+    )
     session.add(room)
     await session.flush()
     session.add(

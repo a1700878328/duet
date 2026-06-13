@@ -15,6 +15,8 @@ dependencies = [
     "pyjwt>=2.9",
     "argon2-cffi>=23.1",
     "python-multipart>=0.0.12",
+    "fastembed>=0.8.0",
+    "chromadb>=1.5.9",
 ]
 
 [dependency-groups]

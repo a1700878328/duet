@@ -39,6 +39,10 @@ class Room(Base):
     name: Mapped[str] = mapped_column(String(128))
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     ai_mode: Mapped[str] = mapped_column(String(16), default="manual")
+    # 世界卡：None=无设定；"ksim"=《女骑士模拟器》lore RAG。
+    world_card: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     members: Mapped[list["RoomMember"]] = relationship(

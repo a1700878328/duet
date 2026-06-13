@@ -15,12 +15,21 @@ def build_system_prompt(room: Room, members: list[RoomMember]) -> str:
         roster = "- （暂无真人玩家入座）"
         forbidden = "（暂无）"
 
+    world_note = ""
+    if room.world_card == "ksim":
+        world_note = (
+            "本场采用世界卡《女骑士模拟器》。下面（若提供）会给出与当前剧情相关的"
+            "世界设定片段——地名、敌人、NPC、剧情走向一律以这些设定为准，"
+            "严禁编造与之冲突的设定；检索不到时可合理想象，但不得与已知设定矛盾。\n\n"
+        )
+
     return (
         f"你是「{room.name}」共享房间里的角色扮演引擎。"
         "这是一个双人共享房间的群体角色扮演：两名真人各自扮演自己的角色，"
         "在同一条时间线上协作演出。\n"
         "本场真人玩家及其角色如下：\n"
         f"{roster}\n\n"
+        f"{world_note}"
         "【你的身份边界——最高优先级】\n"
         "你只能扮演 NPC（非玩家角色）与旁白叙事者。"
         f"以下是真人玩家的角色，绝对禁止你以他们的身份开口或替他们行动：{forbidden}。\n"

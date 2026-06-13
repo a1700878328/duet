@@ -16,6 +16,7 @@ from .brain import BrainProvider, default_provider
 from .config import settings
 from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
+from .lore import store as lore_store
 from .models import Message, Room, RoomMember, User
 from .prompts import build_system_prompt, history_to_messages
 from .schemas import MessageOut
@@ -151,11 +152,23 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
         )
         history = await messages_after(session, coord.room_id, 0, limit=200)
         system_prompt = build_system_prompt(room, members)
+        world_card = room.world_card
 
     messages = history_to_messages(
         system_prompt, history, window=settings.history_window
     )
     forbidden = [m.character_name for m in members if m.character_name]
+
+    # 世界卡 lore RAG：按最近对话检索相关设定片段，注入为附加 system 消息。
+    if world_card == "ksim":
+        recent = " ".join(
+            m.content for m in history[-5:] if m.author_type == "user"
+        )[:600]
+        if recent.strip():
+            lore = await asyncio.to_thread(lore_store.search_formatted, recent, 4)
+            if lore:
+                messages.insert(1, {"role": "system", "content": lore})
+                print(f"[LORE] room={coord.room_id} +{len(lore)}c", flush=True)
 
     finish_reason = "stop"
     guard: dict[str, Any] = {}

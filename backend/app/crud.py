@@ -18,6 +18,7 @@ async def room_to_out(session: AsyncSession, room: Room) -> RoomOut:
         name=room.name,
         owner_id=room.owner_id,
         ai_mode=room.ai_mode,
+        world_card=room.world_card,
         members=[
             MemberOut(
                 user_id=m.user_id,

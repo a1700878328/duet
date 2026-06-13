@@ -13,6 +13,7 @@ export function RoomsPage() {
 
   const [newName, setNewName] = useState("");
   const [newChar, setNewChar] = useState("");
+  const [newWorld, setNewWorld] = useState("");
   const [joinId, setJoinId] = useState("");
   const [joinChar, setJoinChar] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,6 +43,7 @@ export function RoomsPage() {
       const room = await api.createRoom({
         name: newName.trim(),
         character_name: newChar.trim(),
+        world_card: newWorld || null,
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
@@ -95,6 +97,15 @@ export function RoomsPage() {
             value={newChar}
             onChange={(e) => setNewChar(e.target.value)}
           />
+          <select
+            className="input"
+            value={newWorld}
+            onChange={(e) => setNewWorld(e.target.value)}
+            title="世界卡"
+          >
+            <option value="">无世界卡</option>
+            <option value="ksim">《女骑士模拟器》</option>
+          </select>
           <button className="btn btn-primary" disabled={busy}>
             创建
           </button>
@@ -143,6 +154,9 @@ export function RoomsPage() {
                   </span>
                 ))}
                 <span className="chip ai">NPC · AI</span>
+                {room.world_card === "ksim" && (
+                  <span className="chip">🗺 女骑士模拟器</span>
+                )}
               </div>
             </button>
           ))}

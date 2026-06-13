@@ -44,12 +44,14 @@ class RoomOut(BaseModel):
     name: str
     owner_id: int
     ai_mode: str
+    world_card: str | None = None
     members: list[MemberOut]
 
 
 class RoomCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     character_name: str = Field(min_length=1, max_length=128)
+    world_card: str | None = Field(default=None, max_length=32)
 
 
 class RoomJoinIn(BaseModel):

@@ -8,3 +8,4 @@ node_modules/
 *.sqlite3
 ComfyUI/output/
 backend/eval/ledger/
+backend/lore/chroma/

@@ -54,9 +54,10 @@ async def main() -> int:
         ha = {"Authorization": f"Bearer {ta}"}
         hb = {"Authorization": f"Bearer {tb}"}
 
-        room = (await c.post(f"{BASE}/api/rooms", headers=ha, json={"name": "试炼地牢", "character_name": "艾琳"})).json()
+        world = os.environ.get("DUET_WORLD") or None
+        room = (await c.post(f"{BASE}/api/rooms", headers=ha, json={"name": "试炼地牢", "character_name": "艾琳", "world_card": world})).json()
         rid = room["id"]
-        print("alice created room", rid, room["name"])
+        print("alice created room", rid, room["name"], "world=", room.get("world_card"))
         await c.post(f"{BASE}/api/rooms/{rid}/join", headers=hb, json={"character_name": "卡尔"})
         print("bob joined as 卡尔")
 
