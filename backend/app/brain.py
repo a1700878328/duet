@@ -120,5 +120,5 @@ def default_provider() -> BrainProvider:
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
-        max_tokens=420,
+        max_tokens=800,
     )

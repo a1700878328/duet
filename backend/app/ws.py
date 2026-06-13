@@ -20,6 +20,7 @@ from .models import Message, Room, RoomMember, User
 from .prompts import build_system_prompt, history_to_messages
 from .schemas import MessageOut
 from .security import user_from_token
+from .speaker_guard import sanitize
 
 router = APIRouter()
 
@@ -93,6 +94,50 @@ async def _persist_message(
         return msg
 
 
+NARRATOR_FALLBACK = "[旁白]: （场景短暂沉默，发言权留给在场的人。）"
+
+
+def _chunks(text: str, size: int = 12):
+    for i in range(0, len(text), size):
+        yield text[i : i + size]
+
+
+async def _generate_guarded(
+    messages: list[dict[str, str]], forbidden: list[str]
+) -> tuple[str, dict[str, Any]]:
+    """生成不冒充真人角色的 AI 回复。
+
+    fail-closed：先 sanitize；若曾以真人角色名开口，附纠正指令重生成一次再 sanitize。
+    """
+    raw = (await brain.complete(messages)).strip()
+    clean, violated = sanitize(raw, forbidden)
+    info: dict[str, Any] = {
+        "violated_first": violated,
+        "regenerated": False,
+        "violated_final": False,
+    }
+    if violated or not clean:
+        info["regenerated"] = True
+        names = "、".join(forbidden) or "（无）"
+        corrective = messages + [
+            {
+                "role": "system",
+                "content": (
+                    "纠正：你刚才以真人玩家的角色名开口了，这是被禁止的。"
+                    "请重写：只能扮演 NPC 或「旁白」，每段以 [NPC名]: 或 [旁白]: 开头，"
+                    f"绝不能以这些真人角色名作为说话者：{names}。把发言权留给真人玩家。"
+                ),
+            }
+        ]
+        raw2 = (await brain.complete(corrective)).strip()
+        clean2, violated2 = sanitize(raw2, forbidden)
+        if clean2:
+            clean, info["violated_final"] = clean2, violated2
+    if not clean:
+        clean = NARRATOR_FALLBACK
+    return clean, info
+
+
 async def _run_ai_turn(coord: RoomCoordinator) -> None:
     turn_id = uuid.uuid4().hex
     async with SessionFactory() as session:
@@ -110,36 +155,33 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
     messages = history_to_messages(
         system_prompt, history, window=settings.history_window
     )
+    forbidden = [m.character_name for m in members if m.character_name]
 
-    # Allocate the AI message's seq up-front so deltas carry a stable seq.
-    async with SessionFactory() as session:
-        seq = await next_seq(session, coord.room_id)
-
-    parts: list[str] = []
     finish_reason = "stop"
+    guard: dict[str, Any] = {}
     try:
-        async for delta in brain.stream(messages):
-            parts.append(delta)
-            await coord.broadcast(
-                {
-                    "type": "ai_delta",
-                    "turn_id": turn_id,
-                    "seq": seq,
-                    "delta": delta,
-                }
-            )
+        content, guard = await _generate_guarded(messages, forbidden)
     except Exception as exc:  # noqa: BLE001 — surface as a room error, keep serving
         finish_reason = "error"
+        content = ""
         await coord.broadcast(
             {"type": "error", "code": "ai_error", "detail": str(exc)}
         )
 
-    content = "".join(parts).strip()
     if not content:
         content = "（……）"
         if finish_reason == "stop":
             finish_reason = "empty"
 
+    if guard.get("violated_first"):
+        print(
+            f"[GUARD] room={coord.room_id} 冒充真人角色已拦截 "
+            f"regenerated={guard.get('regenerated')} "
+            f"violated_final={guard.get('violated_final')}",
+            flush=True,
+        )
+
+    # 缓冲→守卫→重流：客户端永远看不到被冒充的文本。先落库拿真 seq 再流。
     msg = await _persist_message(
         room_id=coord.room_id,
         author_type="ai",
@@ -147,6 +189,11 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
         content=content,
         author_user_id=None,
     )
+    for chunk in _chunks(content):
+        await coord.broadcast(
+            {"type": "ai_delta", "turn_id": turn_id, "seq": msg.seq, "delta": chunk}
+        )
+        await asyncio.sleep(0.01)
     await coord.broadcast(
         {
             "type": "ai_done",
