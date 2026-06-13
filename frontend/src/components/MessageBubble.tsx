@@ -5,9 +5,47 @@ interface Props {
   message: Pick<Message, "author_type" | "author_user_id" | "speaker_label" | "content">;
   isMe: boolean;
   streaming?: boolean;
+  // Resolved portrait for the speaker (player or NPC); null/undefined = fallback circle.
+  avatarUrl?: string | null;
 }
 
-export function MessageBubble({ message, isMe, streaming = false }: Props) {
+// A round avatar; falls back to a tinted circle with the speaker's initial.
+function Avatar({
+  url,
+  label,
+  variant,
+}: {
+  url?: string | null;
+  label: string;
+  variant: "me" | "ai" | "other";
+}) {
+  const initial = label.trim().charAt(0) || (variant === "ai" ? "🎭" : "?");
+  if (url) {
+    return (
+      <a
+        className="bubble-avatar"
+        href={assetUrl(url)}
+        target="_blank"
+        rel="noreferrer"
+        title={label}
+      >
+        <img src={assetUrl(url)} alt={label} loading="lazy" />
+      </a>
+    );
+  }
+  return (
+    <div className={`bubble-avatar fallback ${variant}`} title={label} aria-hidden>
+      {initial}
+    </div>
+  );
+}
+
+export function MessageBubble({
+  message,
+  isMe,
+  streaming = false,
+  avatarUrl,
+}: Props) {
   const { author_type, speaker_label, content } = message;
 
   if (author_type === "system") {
@@ -45,19 +83,29 @@ export function MessageBubble({ message, isMe, streaming = false }: Props) {
 
   const isAi = author_type === "ai";
   const rowClass = isMe ? "me" : isAi ? "ai" : "other";
+  const variant = isMe ? "me" : isAi ? "ai" : "other";
+  const label = speaker_label || (isAi ? "NPC" : isMe ? "我" : "对方");
+
+  const avatar = (
+    <Avatar url={avatarUrl} label={label} variant={variant} />
+  );
 
   return (
-    <div className={`bubble-row ${rowClass}`}>
-      {!isMe && (
-        <div className="speaker">
-          {speaker_label || (isAi ? "NPC" : "对方")}
-          {isAi && <span className="tag">NPC / 旁白</span>}
+    <div className={`bubble-row ${rowClass} has-avatar`}>
+      {!isMe && avatar}
+      <div className="bubble-col">
+        {!isMe && (
+          <div className="speaker">
+            {speaker_label || (isAi ? "NPC" : "对方")}
+            {isAi && <span className="tag">NPC / 旁白</span>}
+          </div>
+        )}
+        <div className="bubble">
+          {content}
+          {streaming && <span className="cursor" aria-hidden />}
         </div>
-      )}
-      <div className="bubble">
-        {content}
-        {streaming && <span className="cursor" aria-hidden />}
       </div>
+      {isMe && avatar}
     </div>
   );
 }

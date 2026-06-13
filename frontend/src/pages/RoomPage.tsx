@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -9,12 +10,17 @@ import { useNavigate, useParams } from "react-router-dom";
 import { CardPanel } from "../components/CardPanel";
 import { Composer } from "../components/Composer";
 import { MessageBubble } from "../components/MessageBubble";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useRoomSocket } from "../lib/useRoomSocket";
-import type { Room } from "../lib/types";
+import type { Message, RoomCards, Room } from "../lib/types";
 
 const NEAR_BOTTOM_PX = 80;
+
+// Strip a leading "[name]:" or "name：" speaker prefix before TTS synthesis.
+function stripSpeakerPrefix(text: string): string {
+  return text.replace(/^\s*[[【]?[^\]\n：:]{1,24}[\]】]?\s*[：:]\s*/, "").trim();
+}
 
 export function RoomPage() {
   const { roomId = "" } = useParams();
@@ -27,6 +33,20 @@ export function RoomPage() {
   const [autoMode, setAutoMode] = useState(false);
   const [nsfw, setNsfw] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+
+  // Lifted cards state — shared by bubbles (avatar resolver) and the panel.
+  const [cards, setCards] = useState<RoomCards | null>(null);
+  const refreshCards = useCallback(async () => {
+    try {
+      setCards(await api.getCards(roomId));
+    } catch {
+      /* best-effort; panel surfaces its own errors */
+    }
+  }, [roomId]);
+
+  // Voice playback (off by default).
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [voicing, setVoicing] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -78,6 +98,38 @@ export function RoomPage() {
     };
   }, [roomId]);
 
+  // Load cards once on mount (panel refreshes again on open / after mutations).
+  useEffect(() => {
+    void refreshCards();
+  }, [refreshCards]);
+
+  // ---- avatar resolver ----------------------------------------------------
+  // player msg (author_type 'user'): match author_user_id -> MemberCard.avatar_url
+  // ai/npc msg  (author_type 'ai'):  match speaker_label === npc.name -> NpcCard.avatar_url
+  const playerAvatars = useMemo(() => {
+    const m = new Map<string, string | null | undefined>();
+    for (const p of cards?.players ?? []) m.set(String(p.user_id), p.avatar_url);
+    return m;
+  }, [cards]);
+
+  const npcByName = useMemo(() => {
+    const m = new Map<string, { voice_id?: string | null; avatar_url?: string | null }>();
+    for (const n of cards?.npcs ?? [])
+      m.set(n.name, { voice_id: n.voice_id, avatar_url: n.avatar_url });
+    return m;
+  }, [cards]);
+
+  const resolveAvatar = useCallback(
+    (msg: Pick<Message, "author_type" | "author_user_id" | "speaker_label">) => {
+      if (msg.author_type === "user")
+        return playerAvatars.get(String(msg.author_user_id)) ?? null;
+      if (msg.author_type === "ai")
+        return npcByName.get(msg.speaker_label)?.avatar_url ?? null;
+      return null;
+    },
+    [playerAvatars, npcByName],
+  );
+
   // Auto-scroll handling: stick to bottom unless the user scrolled up.
   const timelineRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -111,6 +163,91 @@ export function RoomPage() {
       return () => window.clearTimeout(t);
     }
   }, [messages, autoMode, aiBusy, advance, user?.id]);
+
+  // ---- voice playback -----------------------------------------------------
+  // Serialize TTS via one <audio>; cache by seq so a line is synthesized once.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsCacheRef = useRef<Map<number, string>>(new Map());
+  const playQueueRef = useRef<string[]>([]);
+  const playingRef = useRef(false);
+  const lastVoiceSeqRef = useRef(0);
+
+  const drainQueue = useCallback(() => {
+    if (playingRef.current) return;
+    const next = playQueueRef.current.shift();
+    if (!next) return;
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = new Audio();
+      audio.onended = () => {
+        playingRef.current = false;
+        drainQueue();
+      };
+      audio.onerror = () => {
+        playingRef.current = false;
+        drainQueue();
+      };
+      audioRef.current = audio;
+    }
+    playingRef.current = true;
+    audio.src = assetUrl(next);
+    void audio.play().catch(() => {
+      playingRef.current = false;
+      drainQueue();
+    });
+  }, []);
+
+  const enqueueVoice = useCallback(
+    async (msg: Message) => {
+      const cached = ttsCacheRef.current.get(msg.seq);
+      if (cached) {
+        playQueueRef.current.push(cached);
+        drainQueue();
+        return;
+      }
+      const text = stripSpeakerPrefix(msg.content);
+      if (!text) return;
+      const voiceId = npcByName.get(msg.speaker_label)?.voice_id ?? null;
+      setVoicing(true);
+      try {
+        const { url } = await api.tts(roomId, text, voiceId);
+        ttsCacheRef.current.set(msg.seq, url);
+        playQueueRef.current.push(url);
+        drainQueue();
+      } catch {
+        showToast("配音失败");
+      } finally {
+        setVoicing(false);
+      }
+    },
+    [roomId, npcByName, drainQueue, showToast],
+  );
+
+  // When voice is ON, synthesize+play NEW NPC/AI lines (skip 旁白/system/player).
+  useEffect(() => {
+    if (!voiceOn || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.seq <= lastVoiceSeqRef.current) return;
+    lastVoiceSeqRef.current = last.seq;
+    if (last.author_type !== "ai") return;
+    const label = last.speaker_label?.trim();
+    if (!label || label === "旁白" || label === "NPC") return;
+    if (!npcByName.has(label)) return; // only voice known NPCs
+    void enqueueVoice(last);
+  }, [messages, voiceOn, npcByName, enqueueVoice]);
+
+  // Keep the voice cursor at the latest seq when toggled on, so we don't
+  // suddenly synthesize backlog.
+  useEffect(() => {
+    if (voiceOn && messages.length)
+      lastVoiceSeqRef.current = messages[messages.length - 1].seq;
+  }, [voiceOn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+    };
+  }, []);
 
   function memberOnline(userId: string): boolean {
     return presence.get(userId) ?? false;
@@ -149,6 +286,14 @@ export function RoomPage() {
                 ? "连接中"
                 : "已断开"}
           </span>
+          <button
+            className={`btn btn-ghost voice-toggle ${voiceOn ? "active" : ""}`}
+            onClick={() => setVoiceOn((v) => !v)}
+            aria-pressed={voiceOn}
+            title={voiceOn ? "关闭 NPC 语音播放" : "开启 NPC 语音播放"}
+          >
+            {voiceOn ? "🔊" : "🔇"}
+          </button>
           <button
             className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
             onClick={() => setPanelOpen((v) => !v)}
@@ -195,6 +340,7 @@ export function RoomPage() {
             key={`${m.seq}-${m.id}`}
             message={m}
             isMe={m.author_type === "user" && m.author_user_id === user?.id}
+            avatarUrl={resolveAvatar(m)}
           />
         ))}
 
@@ -209,6 +355,13 @@ export function RoomPage() {
             isMe={false}
             streaming
           />
+        )}
+
+        {voicing && (
+          <div className="streaming-hint voice-hint">
+            <span className="pulse" />
+            🔊 配音中…
+          </div>
         )}
 
         {aiBusy && (
@@ -286,6 +439,8 @@ export function RoomPage() {
         onClose={() => setPanelOpen(false)}
         aiBusy={aiBusy}
         onError={showToast}
+        cards={cards}
+        onRefresh={refreshCards}
         onNpcSpeak={(npcId) => {
           advance(npcId);
           setPanelOpen(false);

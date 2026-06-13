@@ -40,6 +40,7 @@ class MemberOut(BaseModel):
     appearance: str | None = None
     persona: str | None = None
     voice_id: str | None = None
+    avatar_url: str | None = None
 
 
 class RoomOut(BaseModel):
@@ -90,7 +91,22 @@ class NpcCardOut(BaseModel):
     persona: str
     appearance: str | None = None
     voice_id: str | None = None
+    avatar_url: str | None = None
+    active: bool = True
     created_by_ai: bool
+
+
+class NpcActiveIn(BaseModel):
+    active: bool
+
+
+class TtsIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    voice_id: str | None = Field(default=None, max_length=200)
+
+
+class TtsOut(BaseModel):
+    url: str
 
 
 class CardsOut(BaseModel):

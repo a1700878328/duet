@@ -69,6 +69,10 @@ class RoomMember(Base):
     voice_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
     joined_at: Mapped[datetime] = mapped_column(default=_now)
 
     room: Mapped["Room"] = relationship(back_populates="members")
@@ -112,6 +116,12 @@ class NpcCard(Base):
     voice_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
+    # active=False 表示该 NPC 已被关闭/退出实时模拟（director 据此过滤）。
+    active: Mapped[bool] = mapped_column(default=True)
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )

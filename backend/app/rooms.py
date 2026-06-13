@@ -1,5 +1,7 @@
 """REST endpoints: auth + rooms + messages."""
 
+import uuid
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .crud import is_member, messages_after, room_to_out
 from .db import get_session
+from .imagegen.portrait import generate_portrait
 from .models import NpcCard, Room, RoomMember, User
 from .npc_gen import generate_npcs
 from .schemas import (
@@ -20,6 +23,7 @@ from .schemas import (
     MemberOut,
     MeOut,
     MessageOut,
+    NpcActiveIn,
     NpcCardIn,
     NpcCardOut,
     NpcGenIn,
@@ -27,6 +31,8 @@ from .schemas import (
     RoomCreateIn,
     RoomJoinIn,
     RoomOut,
+    TtsIn,
+    TtsOut,
     UserOut,
 )
 from .security import (
@@ -35,6 +41,7 @@ from .security import (
     hash_password,
     verify_password,
 )
+from .voice import store as voice_store
 
 router = APIRouter(prefix="/api")
 
@@ -186,6 +193,7 @@ def _member_card(m: RoomMember, display_name: str) -> MemberOut:
         appearance=m.appearance,
         persona=m.persona,
         voice_id=m.voice_id,
+        avatar_url=m.avatar_url,
     )
 
 
@@ -324,3 +332,95 @@ async def delete_npc(
         await session.delete(npc)
         await session.commit()
     return {"status": "ok"}
+
+
+# ---- 立绘/头像 + NPC 启停（Phase E） ----
+
+
+@router.post("/rooms/{room_id}/me-card/avatar", response_model=MemberOut)
+async def generate_my_avatar(
+    room_id: int, user: CurrentUser, session: SessionDep
+) -> MemberOut:
+    member = await session.scalar(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
+        )
+    result = await generate_portrait(
+        member.appearance or member.character_name or "1person"
+    )
+    if not result.get("url"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error", "生成头像失败"),
+        )
+    member.avatar_url = result["url"]
+    await session.commit()
+    await session.refresh(member)
+    return _member_card(member, user.display_name)
+
+
+@router.post("/rooms/{room_id}/npcs/{npc_id}/avatar", response_model=NpcCardOut)
+async def generate_npc_avatar(
+    room_id: int, npc_id: int, user: CurrentUser, session: SessionDep
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
+        )
+    result = await generate_portrait(npc.appearance or npc.name or "1person")
+    if not result.get("url"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error", "生成头像失败"),
+        )
+    npc.avatar_url = result["url"]
+    await session.commit()
+    await session.refresh(npc)
+    return NpcCardOut.model_validate(npc)
+
+
+@router.put("/rooms/{room_id}/npcs/{npc_id}/active", response_model=NpcCardOut)
+async def set_npc_active(
+    room_id: int,
+    npc_id: int,
+    body: NpcActiveIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
+        )
+    npc.active = body.active
+    await session.commit()
+    await session.refresh(npc)
+    return NpcCardOut.model_validate(npc)
+
+
+_AUDIO_DIR = Path(__file__).resolve().parent / "media" / "audio"
+
+
+@router.post("/rooms/{room_id}/tts", response_model=TtsOut)
+async def synth_tts(
+    room_id: int, body: TtsIn, user: CurrentUser, session: SessionDep
+) -> TtsOut:
+    """合成一段台词音频（按 voice_id 走 VoxCPM 声音设计），返回 /media 下的 wav url。"""
+    await _require_member(session, room_id, user.id)
+    audio = await voice_store.synth(body.text, body.voice_id)
+    if not audio:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="语音合成失败"
+        )
+    _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.wav"
+    (_AUDIO_DIR / name).write_bytes(audio)
+    return TtsOut(url=f"/media/audio/{name}")

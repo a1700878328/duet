@@ -58,6 +58,31 @@ NPC 发言时，用**该 NPC 的卡**作系统提示词单独调脑（DeepSeek�
 
 **先做 A**：地基，低风险，独立可验。再 B→C→D→E。每阶段保持可玩、可回归(评测台扩"多NPC不串台/导演选人合理"探针)。
 
+## 3b. 第二轮重设计（用户 2026-06-14，做 E 时一并落）
+
+**导演角色再定位**（叙事时间下变轻）：① 每拍选谁此刻反应；② 跳时间叙述+模拟幕后；③ **选角：剧情需要时引入新 NPC**。不再逐句提线。
+
+**动态登场 NPC**：房间一开始 `npc_cards` 为空。导演 direct_beat 输出新增 `introduce`（0-N 个新 NPC 草案 name/persona/appearance，剧情需要时"某某登场"），后端落卡(created_by_ai)+广播。剧情越久 NPC 越多。每个 NPC 一个 `active` 开关（默认 True）；面板"关闭"→ active=False → 退出导演候选/模拟（保留卡可重启）。需 `npc_cards.active`(bool default True) + `avatar_url`(立绘)。
+
+**登场面板增强**：每 NPC 显示资料 + **立绘**（点开大图）+ 关闭/启用开关。
+
+**进房强制选角**（改 onboarding）：建房表单**去掉**角色名/外貌（只留房名+世界卡）。进房后若"我"还没角色卡→**全屏选角**：
+- AI 生成 N 个候选角色（含简介 + **立绘**，POST 一个 `players/options` 类接口，返回草案+图，不落库）
+- "🎲 换一批"重抽
+- "✍️ 自己描述"→填一句话→AI 扩成完整卡(+立绘)
+- 选定 → 写入我的 `room_members` 卡。
+需后端：候选生成接口(brain 出 N 个角色草案 + 各自 imagegen 立绘)；前端选角全屏 UI。
+
+**E 扩展（立绘/头像核心）**：角色卡(玩家+NPC) `avatar_url` = 用其 appearance 走 imagegen 出**肖像**(竖图/头像裁切)。对话气泡左侧显示头像(玩家+NPC都要)；选角/NPC面板显示立绘。
+- **语音 per-NPC**：✅已验证。VoxCPM 在**本机** `C:\TkymWork\VoxCPM`，TTS 127.0.0.1:9233(懒加载,管理:9234 /ensure 拉起)。**用 VoxCPM2 即兴声音设计**:卡 `voice_id`=一段中文声音描述→合成时 `voice="design:<描述>"`→每NPC独有新声音(npc_gen已改产出声音描述;`app/voice.py` 已写,design模式实测通)。待接:TTS端点+NPC说话出声+房间下发音频+前端播放。
+
+**🔁 生图底模切换 Anima（用户 2026-06-14 定"换 Anima 多人优先"）**：原 SDXL(oneObsession)+AttentionCouple 双人换成 **Anima DiT 2B**(`diffusion_models/anima-base-v1.0.safetensors`)。理由:DiT 原生多主体+听话→**多人同框自然、不需要 AttentionCouple 区域 hack、可超 2 人**。本机齐:anima base + `loras/anima-turbo-lora-v0.1`(加速) + NSFW LoRA(`blacked_underwear_anima` 证明能涩) + `controlnet/anima-lllite-*`(LLLite 控制) + 节点 `ANIMA_BOOSTER`(3.5-5x加速) `ComfyUI-Anima-LLLite`。
+- **代价**:**IP-Adapter FaceID 一致性方案作废**(FaceID 是 SDXL UNet 专属,DiT 用不了)。一致性退而求其次:① 每卡固定 `seed` 复用;② 详细 appearance 描述锁形象;③ 后期可试 anima-lllite 参考控制。脸不会像 FaceID 那样死锁,但发色/瞳色/服装/风格稳,可接受(用户选多人优先)。
+- **待做**:研究/搭 Anima DiT ComfyUI 工作流(model loader 不是 checkpoint loader;DiT 文本编码器;VAE;sampler;可挂 turbo-lora + ANIMA_BOOSTER 加速),支持**单人 + 多人**(N 角色写进 prompt);重写 imagegen 的生成后端从 SDXL→Anima(立绘+场景图都走 Anima 保同模一致);scene_prompt 改成多角色友好(不止 single/duo)。
+- **生图逻辑已修(2026-06-14)**:`_handle_image` 按"这一幕实际出场角色"取外貌卡(SDXL 时≤2;换 Anima 后可放开人数)。
+
+**新建造顺序**：E立绘/头像(Anima 底模) + ✅语音地基 → 一致性(seed+详细描述) → 选角onboarding(依赖立绘) → 动态登场NPC+关闭 → 评测探针补。**前置:先把 Anima DiT 工作流搭通(研究型,关键未知)。**
+
 ## 4. Phase A 实现级规格（先做）
 
 ### 4.1 数据模型

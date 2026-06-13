@@ -11,3 +11,4 @@ backend/eval/ledger/
 backend/lore/chroma/
 backend/app/media/
 backend/app/memory_store/
+*.wav

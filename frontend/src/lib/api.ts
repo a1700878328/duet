@@ -183,6 +183,32 @@ export const api = {
     request<{ status: string }>(`/rooms/${roomId}/npcs/${npcId}`, {
       method: "DELETE",
     }),
+
+  // Generate my portrait from my appearance (slow ~30-60s).
+  generateMyAvatar: (roomId: string) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card/avatar`, {
+      method: "POST",
+    }),
+
+  // Generate an NPC's portrait (slow ~30-60s).
+  generateNpcAvatar: (roomId: string, npcId: number) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/avatar`, {
+      method: "POST",
+    }),
+
+  // Enable/disable an NPC (= include/exclude from director simulation).
+  setNpcActive: (roomId: string, npcId: number, active: boolean) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/active`, {
+      method: "PUT",
+      body: JSON.stringify({ active }),
+    }),
+
+  // Synthesize a line to a wav (~5-10s); returns a /media/audio url.
+  tts: (roomId: string, text: string, voiceId?: string | null) =>
+    request<{ url: string }>(`/rooms/${roomId}/tts`, {
+      method: "POST",
+      body: JSON.stringify({ text, voice_id: voiceId ?? null }),
+    }),
 };
 
 // Resolve a server-relative asset path (e.g. /media/...) against the API origin.

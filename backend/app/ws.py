@@ -319,7 +319,10 @@ async def _handle_director_beat(
             )
             npcs = list(
                 await session.scalars(
-                    select(NpcCard).where(NpcCard.room_id == coord.room_id)
+                    select(NpcCard).where(
+                        NpcCard.room_id == coord.room_id,
+                        NpcCard.active.is_(True),
+                    )
                 )
             )
             history = await messages_after(session, coord.room_id, 0, limit=200)
@@ -399,6 +402,11 @@ async def _handle_image(
                     select(RoomMember).where(RoomMember.room_id == coord.room_id)
                 )
             )
+            npcs = list(
+                await session.scalars(
+                    select(NpcCard).where(NpcCard.room_id == coord.room_id)
+                )
+            )
             history = await messages_after(session, coord.room_id, 0, limit=200)
         scene_text = (
             "\n".join(
@@ -408,8 +416,30 @@ async def _handle_image(
             )
             or "一个角色扮演场景"
         )
-        appearances = [(m.appearance or m.character_name) for m in members][:2]
-        two_person = len(members) >= 2
+        # 外貌按"这一幕实际出场的角色"(玩家+NPC，看最近发言人)取各自外貌卡，
+        # 而非固定取两个玩家——NPC 才常是画面主角。
+        look: dict[str, str] = {}
+        for m in members:
+            if m.character_name:
+                look[m.character_name] = m.appearance or m.character_name
+        for n in npcs:
+            look[n.name] = n.appearance or n.name
+        scene_chars: list[str] = []
+        for msg in reversed(history[-8:]):
+            lbl = msg.speaker_label
+            if (
+                msg.author_type in {"user", "ai"}
+                and lbl in look
+                and lbl not in scene_chars
+                and lbl not in {"旁白", "AI"}
+            ):
+                scene_chars.append(lbl)
+            if len(scene_chars) >= 2:
+                break
+        if not scene_chars:
+            scene_chars = [m.character_name for m in members if m.character_name][:2]
+        appearances = [look[c] for c in scene_chars if c in look][:2]
+        two_person = len(appearances) >= 2
         try:
             prompt = await build_scene_prompt(
                 scene_text, appearances, nsfw=nsfw, two_person=two_person

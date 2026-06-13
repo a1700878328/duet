@@ -16,6 +16,7 @@ from .guard import (
     assert_no_poisoned_colors,
     assert_workflow_safe,
 )
+from .portrait import generate_portrait
 from .registry import (
     UnverifiedCharacter,
     build_character_prompt,
@@ -34,6 +35,7 @@ __all__ = [
     "generate_duo",
     "generate_raw_single",
     "generate_raw_duo",
+    "generate_portrait",
     "build_scene_prompt",
     "resolve",
     "build_character_prompt",

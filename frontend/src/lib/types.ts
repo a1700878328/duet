@@ -16,6 +16,7 @@ export interface RoomMember {
   appearance?: string | null;
   persona?: string | null;
   voice_id?: string | null;
+  avatar_url?: string | null;
 }
 
 // A character card for a member (player). Returned by GET /rooms/{id}/cards.
@@ -26,6 +27,7 @@ export interface MemberCard {
   appearance: string | null;
   persona: string | null;
   voice_id: string | null;
+  avatar_url?: string | null;
 }
 
 // An NPC card living in a room (AI- or hand-authored).
@@ -36,6 +38,8 @@ export interface NpcCard {
   appearance?: string | null;
   voice_id?: string | null;
   created_by_ai: boolean;
+  active: boolean;
+  avatar_url?: string | null;
 }
 
 export interface RoomCards {

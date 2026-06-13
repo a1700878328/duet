@@ -48,7 +48,10 @@ async def generate_npcs(
         "你是角色扮演 NPC 设计师。根据世界设定生成若干风格各异、适合互动的 NPC 角色卡。"
         "严格只输出 JSON 数组，不要任何多余文字或解释。每个元素形如："
         '{"name":"中文名","persona":"一句话身份+性格+说话风格",'
-        '"appearance":"英文 Danbooru 外貌标签","voice_id":"英文短标识如 old_man1"}。'
+        '"appearance":"英文 Danbooru 外貌标签",'
+        '"voice_id":"一句话中文声音设计描述：性别+年龄+音色+语气，'
+        '如 沙哑低沉的中年男声带着江湖气 / 清脆娇媚的少女声"}。'
+        "voice_id 要贴合该角色，每个 NPC 的声音各不相同。"
     )
     user = f"世界设定：{world}{avoid}{extra}\n生成 {count} 个 NPC。"
     raw = (

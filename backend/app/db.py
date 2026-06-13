@@ -30,6 +30,11 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "appearance": "VARCHAR(512)",
         "persona": "TEXT",
         "voice_id": "VARCHAR(64)",
+        "avatar_url": "VARCHAR(256)",
+    },
+    "npc_cards": {
+        "avatar_url": "VARCHAR(256)",
+        "active": "BOOLEAN DEFAULT 1",
     },
 }
 

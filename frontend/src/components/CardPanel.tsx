@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "../lib/api";
-import type { MemberCard, NpcCard } from "../lib/types";
+import { api, ApiError, assetUrl } from "../lib/api";
+import type { NpcCard, RoomCards } from "../lib/types";
 import { CardEditor, type CardDraft } from "./CardEditor";
 
 interface Props {
@@ -13,6 +13,9 @@ interface Props {
   onError?: (msg: string) => void;
   // Disable speak actions while an AI turn is in flight.
   aiBusy?: boolean;
+  // Cards are owned by RoomPage so bubbles + panel share one source.
+  cards: RoomCards | null;
+  onRefresh: () => Promise<void> | void;
 }
 
 const EMPTY_DRAFT: CardDraft = {
@@ -29,6 +32,21 @@ type EditTarget =
   | { kind: "new" }
   | null;
 
+// A round/rounded portrait thumbnail that opens full-size in a new tab.
+function AvatarThumb({ url, alt }: { url: string; alt: string }) {
+  return (
+    <a
+      className="card-avatar-thumb"
+      href={assetUrl(url)}
+      target="_blank"
+      rel="noreferrer"
+      title="查看大图"
+    >
+      <img src={assetUrl(url)} alt={alt} loading="lazy" />
+    </a>
+  );
+}
+
 export function CardPanel({
   roomId,
   myUserId,
@@ -37,16 +55,21 @@ export function CardPanel({
   onNpcSpeak,
   onError,
   aiBusy = false,
+  cards,
+  onRefresh,
 }: Props) {
-  const [players, setPlayers] = useState<MemberCard[]>([]);
-  const [npcs, setNpcs] = useState<NpcCard[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const players = cards?.players ?? [];
+  const npcs = cards?.npcs ?? [];
+  const loaded = cards !== null;
+
   const [editing, setEditing] = useState<EditTarget>(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genCount, setGenCount] = useState(4);
   const [genHint, setGenHint] = useState("");
+  // Per-target avatar-generation in flight (key "me" or npc id), + active toggles.
+  const [avatarBusy, setAvatarBusy] = useState<Set<string>>(new Set());
+  const [activeBusy, setActiveBusy] = useState<Set<number>>(new Set());
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -57,25 +80,28 @@ export function CardPanel({
   );
 
   const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cards = await api.getCards(roomId);
-      setPlayers(cards.players);
-      setNpcs(cards.npcs);
-      setLoaded(true);
-    } catch (err) {
-      fail(err, "加载角色卡失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [roomId, fail]);
+    await onRefresh();
+  }, [onRefresh]);
 
-  // Load cards when the panel opens (first time / each open keeps fresh).
+  // Refresh when the panel opens to keep cards fresh.
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh]);
 
   const myCard = players.find((p) => String(p.user_id) === String(myUserId));
+
+  function setBusy<T>(
+    setter: React.Dispatch<React.SetStateAction<Set<T>>>,
+    key: T,
+    on: boolean,
+  ) {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
 
   async function saveMe(draft: CardDraft) {
     setSaving(true);
@@ -142,6 +168,43 @@ export function CardPanel({
     }
   }
 
+  async function genMyAvatar() {
+    setBusy<string>(setAvatarBusy, "me", true);
+    try {
+      await api.generateMyAvatar(roomId);
+      await refresh();
+    } catch (err) {
+      fail(err, "生成头像失败");
+    } finally {
+      setBusy<string>(setAvatarBusy, "me", false);
+    }
+  }
+
+  async function genNpcAvatar(npc: NpcCard) {
+    const key = String(npc.id);
+    setBusy(setAvatarBusy, key, true);
+    try {
+      await api.generateNpcAvatar(roomId, npc.id);
+      await refresh();
+    } catch (err) {
+      fail(err, "生成头像失败");
+    } finally {
+      setBusy(setAvatarBusy, key, false);
+    }
+  }
+
+  async function toggleActive(npc: NpcCard) {
+    setBusy(setActiveBusy, npc.id, true);
+    try {
+      await api.setNpcActive(roomId, npc.id, !npc.active);
+      await refresh();
+    } catch (err) {
+      fail(err, "切换 NPC 状态失败");
+    } finally {
+      setBusy(setActiveBusy, npc.id, false);
+    }
+  }
+
   async function generate() {
     setGenerating(true);
     try {
@@ -157,6 +220,8 @@ export function CardPanel({
       setGenerating(false);
     }
   }
+
+  const myAvatarBusy = avatarBusy.has("me");
 
   return (
     <>
@@ -178,9 +243,7 @@ export function CardPanel({
         </div>
 
         <div className="card-panel-body">
-          {loading && !loaded && (
-            <div className="empty">加载角色卡中…</div>
-          )}
+          {!loaded && <div className="empty">加载角色卡中…</div>}
 
           {/* ---- 我的角色卡 ---- */}
           <section className="card-section">
@@ -212,10 +275,35 @@ export function CardPanel({
               />
             ) : myCard ? (
               <div className="card-row">
+                {myCard.avatar_url && (
+                  <AvatarThumb
+                    url={myCard.avatar_url}
+                    alt={myCard.character_name}
+                  />
+                )}
                 <div className="card-row-main">
                   <div className="card-row-name">{myCard.character_name}</div>
                   <div className="card-row-sub muted">
                     {myCard.persona || "（还没有人设，点编辑补充）"}
+                  </div>
+                  <div className="card-row-actions">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={genMyAvatar}
+                      disabled={myAvatarBusy}
+                      title="根据外貌描述生成头像（约 30–60 秒）"
+                    >
+                      {myAvatarBusy ? (
+                        <>
+                          <span className="spinner spinner-dark" />
+                          生成头像中…
+                        </>
+                      ) : myCard.avatar_url ? (
+                        "🎨 重新生成头像"
+                      ) : (
+                        "🎨 生成头像"
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -237,40 +325,94 @@ export function CardPanel({
             )}
 
             <div className="npc-list">
-              {npcs.map((npc) =>
-                editing?.kind === "npc" && editing.npc.id === npc.id ? (
-                  <CardEditor
+              {npcs.map((npc) => {
+                const busyAvatar = avatarBusy.has(String(npc.id));
+                const busyActive = activeBusy.has(npc.id);
+                if (editing?.kind === "npc" && editing.npc.id === npc.id) {
+                  return (
+                    <CardEditor
+                      key={npc.id}
+                      title={`编辑 NPC「${npc.name}」`}
+                      initial={{
+                        name: npc.name,
+                        persona: npc.persona,
+                        appearance: npc.appearance ?? "",
+                        voice_id: npc.voice_id ?? "",
+                      }}
+                      saving={saving}
+                      onSubmit={(d) => saveNpc(npc.id, d)}
+                      onCancel={() => setEditing(null)}
+                    />
+                  );
+                }
+                return (
+                  <div
+                    className={`card-row npc-row ${npc.active ? "" : "disabled"}`}
                     key={npc.id}
-                    title={`编辑 NPC「${npc.name}」`}
-                    initial={{
-                      name: npc.name,
-                      persona: npc.persona,
-                      appearance: npc.appearance ?? "",
-                      voice_id: npc.voice_id ?? "",
-                    }}
-                    saving={saving}
-                    onSubmit={(d) => saveNpc(npc.id, d)}
-                    onCancel={() => setEditing(null)}
-                  />
-                ) : (
-                  <div className="card-row npc-row" key={npc.id}>
-                    <div className="card-row-main">
-                      <div className="card-row-name">
-                        {npc.name}
-                        {npc.created_by_ai && (
-                          <span className="tag npc-ai-tag">✨AI</span>
-                        )}
+                  >
+                    <div className="npc-row-top">
+                      {npc.avatar_url && (
+                        <AvatarThumb url={npc.avatar_url} alt={npc.name} />
+                      )}
+                      <div className="card-row-main">
+                        <div className="card-row-name">
+                          {npc.name}
+                          {npc.created_by_ai && (
+                            <span className="tag npc-ai-tag">✨AI</span>
+                          )}
+                          {!npc.active && (
+                            <span className="tag npc-off-tag">已关闭</span>
+                          )}
+                        </div>
+                        <div className="card-row-sub muted">{npc.persona}</div>
                       </div>
-                      <div className="card-row-sub muted">{npc.persona}</div>
+                      <label
+                        className="toggle npc-active-toggle"
+                        title={
+                          npc.active
+                            ? "已启用：参与自动导演模拟。点击关闭。"
+                            : "已关闭：不参与自动导演模拟。点击启用。"
+                        }
+                      >
+                        <span
+                          className={`switch ${npc.active ? "on" : ""} ${
+                            busyActive ? "busy" : ""
+                          }`}
+                          onClick={() => !busyActive && toggleActive(npc)}
+                          role="switch"
+                          aria-checked={npc.active}
+                        />
+                      </label>
                     </div>
                     <div className="npc-actions">
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => onNpcSpeak(npc.id)}
-                        disabled={aiBusy}
-                        title="让这个 NPC 在时间线里接话"
+                        disabled={aiBusy || !npc.active}
+                        title={
+                          npc.active
+                            ? "让这个 NPC 在时间线里接话"
+                            : "已关闭的 NPC 不能接话"
+                        }
                       >
                         让 TA 接话
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => genNpcAvatar(npc)}
+                        disabled={busyAvatar}
+                        title="根据外貌描述生成头像（约 30–60 秒）"
+                      >
+                        {busyAvatar ? (
+                          <>
+                            <span className="spinner spinner-dark" />
+                            头像生成中…
+                          </>
+                        ) : npc.avatar_url ? (
+                          "🎨 重生头像"
+                        ) : (
+                          "🎨 头像"
+                        )}
                       </button>
                       <button
                         className="btn btn-ghost btn-sm"
@@ -286,8 +428,8 @@ export function CardPanel({
                       </button>
                     </div>
                   </div>
-                ),
-              )}
+                );
+              })}
             </div>
 
             {editing?.kind === "new" ? (

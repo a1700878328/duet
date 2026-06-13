@@ -836,3 +836,135 @@ textarea {
   border-color: rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
 }
+
+/* ---------- Phase E: bubble avatars, thumbnails, voice ---------- */
+
+/* a darker spinner that reads on ghost/light buttons */
+.spinner-dark {
+  border-color: rgba(176, 108, 255, 0.35);
+  border-top-color: var(--accent);
+}
+
+/* bubble rows lay out avatar + content side by side */
+.bubble-row.has-avatar {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 82%;
+}
+.bubble-row.has-avatar.me {
+  flex-direction: row;
+}
+.bubble-row.has-avatar .bubble-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bubble-row.has-avatar.me .bubble-col {
+  align-items: flex-end;
+}
+
+.bubble-avatar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+  align-self: flex-end;
+}
+.bubble-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.bubble-avatar.fallback {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.bubble-avatar.fallback.me {
+  background: linear-gradient(135deg, var(--me-grad-a), var(--me-grad-b));
+  color: #fff;
+  border-color: transparent;
+}
+.bubble-avatar.fallback.ai {
+  background: var(--ai-soft);
+  border-color: var(--ai-border);
+  color: var(--ai);
+}
+
+.voice-toggle {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  font-size: 15px;
+}
+.voice-toggle.active {
+  background: var(--ai-soft);
+  border-color: var(--ai-border);
+  color: var(--ai);
+}
+.voice-hint {
+  color: var(--ai);
+}
+
+/* card thumbnails in the panel */
+.card-avatar-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: block;
+}
+.card-avatar-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-row-actions {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* npc row: portrait + text + active toggle on top, actions below */
+.npc-row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+.npc-active-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.npc-active-toggle .switch.busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.npc-off-tag {
+  background: rgba(255, 93, 108, 0.14);
+  color: var(--danger);
+  border-color: rgba(255, 93, 108, 0.4);
+}
+
+/* dimmed look for a disabled NPC */
+.card-row.npc-row.disabled {
+  opacity: 0.6;
+  border-style: dashed;
+}
+.card-row.npc-row.disabled .card-row-name {
+  color: var(--text-dim);
+}
