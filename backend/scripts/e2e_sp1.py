@@ -10,13 +10,14 @@ alice say → 验证 bob 收到 → alice advance → 收集 ai_delta 直到 ai_
 
 import asyncio
 import json
+import os
 import sys
 
 import httpx
 import websockets
 
-BASE = "http://127.0.0.1:8000"
-WS = "ws://127.0.0.1:8000"
+BASE = os.environ.get("DUET_BASE", "http://127.0.0.1:8000")
+WS = os.environ.get("DUET_WS", BASE.replace("http", "ws", 1))
 
 
 async def reg_or_login(c: httpx.AsyncClient, username: str, pw: str, name: str) -> str:
