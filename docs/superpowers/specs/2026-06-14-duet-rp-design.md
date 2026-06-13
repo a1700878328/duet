@@ -44,10 +44,13 @@
 │   └─ ComfyUI 直连 127.0.0.1:52188 (单/双人 NSFW 生图)            │
 └───────────────────────────────────────────────────────────────┘
         │ 局域网 192.168.1.x
-┌─ Jetson .102 — 脑子 + 语音 ───────────────────────────────────┐
-│  Qwen3.6-35B-Uncensored  192.168.1.102:8080/v1/chat/completions │
-│    256K ctx · 4 槽 · 无审查 · enable_thinking:false · SSE 流式   │
+☁️ 脑子 BRAIN = DeepSeek V4 Flash (云, OpenAI 兼容 /chat/completions, SSE 流式)
+   接入路径待定: 复用 Hermes deepseek 配置 / 官方 API / OpenRouter
+   后备: Jetson 本地 Qwen 192.168.1.102:8080 (无审查, DeepSeek 拒涩时兜底)
+
+┌─ Jetson .102 — 语音 (+ 脑子后备) ─────────────────────────────┐
 │  VoxCPM TTS  192.168.1.102:9233 (可达性待最终确认)               │
+│  Qwen3.6-35B-Uncensored  192.168.1.102:8080 (后备脑)            │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,10 +60,12 @@
 
 ## 4. 关键技术决策（已被调研实测校正）
 
-- **脑子 = Jetson Qwen 一个端点全包**，RP 与辅助任务都用它。
-  - ❌ Hermes：`:8642` 不存在；真实 `:5140` 是 webhook，最终还调同一个 Qwen → 纯开销。
-  - ❌ DeepSeek 云：审查拒涩 + 数据出网。仅作非涩辅助任务的可选后备（需 API key）。
-  - ⚠️ Qwen 是 thinking 模型：**必须** `chat_template_kwargs:{enable_thinking:false}`，否则 `content` 为空。用 **SSE 流式**掩盖 ~37 tok/s（~11s/400 token）的延迟。
+- **脑子 = DeepSeek V4 Flash**（用户指定，2026-06-14 覆盖原 Qwen 方案），RP 与辅助任务都用它。
+  - 接入 = **DeepSeek 官方 API**（已确认 Hermes 走此路）：base_url `https://api.deepseek.com`、model `deepseek-v4-flash`（官方一线 id，**1M 上下文**）、auth `DEEPSEEK_API_KEY`、OpenAI 兼容 `/chat/completions`、**SSE 流式**。key 由 App 自身 `.env`/密钥库读取（用户放入与 Hermes 同一个 key，文件 0600，不贴明文）。
+  - 非 thinking 模型，无 `enable_thinking` 陷阱；云端延迟通常优于本地 Qwen。
+  - ⚠️ **核心风险待实测**：调研标注 DeepSeek API 对显式 NSFW 可能审查拒答；但实际被广泛用于 NSFW RP，多半可用。**锁定前对目标端点跑一次 NSFW 探针确认不拒。**
+  - ❌ Hermes 网关：`:8642` 不存在、`:5140` 只是 webhook → 不作脑入口（但其 deepseek 配置可借）。
+  - 🅑 后备：Jetson 本地 Qwen `:8080`（无审查），DeepSeek 万一拒涩时的兜底。
 - **生图 = 本机 ComfyUI 直连**（Option A）：POST `127.0.0.1:52188/prompt` → 轮询 `/history/{id}` → `/view` 取图。
   - **必须整体移植** rp_system 三件套：`char_resolve.py`（提示词构建/fail-closed）+ `assert_no_poisoned_colors`（防错色守卫）+ 单/双人 `build_*_workflow` 模板 + `character_facts.json` + `CHARACTER_LORAS` 映射。否则重现"银发蓝眼"幻觉 bug。
   - HTTP 改 **httpx.AsyncClient**（原版用同步 `requests`）；`/tmp` 路径改 Windows 输出目录 `C:\Users\a1700\Documents\ComfyUI\output`。
@@ -122,7 +127,7 @@
 并发：每房间一个 asyncio 协调器，串行化 seq 分配与 advance（同一时刻一个 AI 回合，advance 重入直接忽略并回 `error: ai_busy`）。
 
 ### 6.5 脑调用（SP-1 内联最小版，SP-2 抽出硬化）
-- httpx.AsyncClient POST `http://192.168.1.102:8080/v1/chat/completions`，`stream:true`，`chat_template_kwargs:{enable_thinking:false}`，`temperature:0.9`，`max_tokens:420`。
+- httpx.AsyncClient POST DeepSeek V4 Flash 的 OpenAI 兼容 `/chat/completions`（base_url + model + key 见 §4/§8），`stream:true`，`temperature:0.9`，`max_tokens:420`。脑入口封装成**可配置 provider**（base_url/model/key/headers），便于在 DeepSeek 与 Qwen 后备间一行切换。
 - system 提示词（SP-1 最小版）：声明这是双人共享房间群演；列出两名真人各自 `character_name`；AI 只演 NPC/旁白，不冒充真人、不替真人发言；直接出对白不带思考过程/英文 reasoning（沿用 qq_agent prompts 的硬约束）。
 - 历史：取该房间最近 N 条 messages 转 OpenAI messages（user 消息带 `[speaker_label]:` 前缀以区分双人 + NPC）。
 - 流式分片经 WS 广播；完成落库为一条 author_type=ai 消息。
@@ -159,8 +164,10 @@
 
 ## 8. 风险与待办
 
-- **Jetson 单点**：脑 + 语音都在 .102，其宕机则 RP 停摆，无 NSFW 后备（DeepSeek 拒涩）。接受 or 备机。
-- **thinking 标志陷阱**：忘传 `enable_thinking:false` → 回复全空。集中在脑适配器一处设置。
+- **脑子接入已定**：DeepSeek 官方 `https://api.deepseek.com` · `deepseek-v4-flash` · `DEEPSEEK_API_KEY`。key 由用户放入 App 密钥库（与 Hermes 同一个 key）；NSFW 探针在 key 就位后跑。
+- **DeepSeek NSFW 拒答风险**：本应用是 NSFW RP，云端审查可能拒显式内容。锁定前对目标端点跑 NSFW 探针；若拒 → 启用 Qwen 后备 / 调提示词 / 选更宽松的 deepseek 变体。
+- **隐私/出网**：DeepSeek 是云端，RP 内容会发给第三方（不再全程留局域网）。用户已接受。
+- **语音单点**：VoxCPM 在 .102，宕机则无配音（不影响文字 RP）。
 - **4 并发槽**：双人 + 后台抽取足够，但峰值可能争用；mem0 抽取走后台。
 - **ComfyUI 移植保真**：防错色守卫 + 角色注册表必须**整体**移植，否则重现银发蓝眼幻觉。需逐一确认 `CHARACTER_LORAS` 每个 `.safetensors` 在位（仅抽样确认 + 总数 37）；`xinsir_openpose_sdxl.safetensors` ControlNet 模型未确认；双人 hires 1824×1248 对 16GB 显存偏重，需复刻 CUDA-sticky 重启重试。
 - **Windows 路径**：rp_system `/tmp/{fn}` 是 POSIX，改 Windows 输出目录或直读 output 目录。
