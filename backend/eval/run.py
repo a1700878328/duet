@@ -198,8 +198,7 @@ def print_summary(results: list[Result]) -> bool:
     print("  Duet RP EVAL — per-dimension summary")
     print("=" * 72)
     header = (
-        f"  {'dimension':<14}{'pass/total':>12}{'rate':>8}  "
-        f"{'thr':>5}  {'':<16}  ok"
+        f"  {'dimension':<14}{'pass/total':>12}{'rate':>8}  {'thr':>5}  {'':<16}  ok"
     )
     print(header)
     print("  " + "-" * 68)
