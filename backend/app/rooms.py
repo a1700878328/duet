@@ -9,13 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .crud import is_member, messages_after, room_to_out
 from .db import get_session
-from .models import Room, RoomMember, User
+from .models import NpcCard, Room, RoomMember, User
 from .schemas import (
     AuthOut,
+    CardsOut,
     HealthOut,
     LoginIn,
+    MeCardUpdateIn,
+    MemberOut,
     MeOut,
     MessageOut,
+    NpcCardIn,
+    NpcCardOut,
     RegisterIn,
     RoomCreateIn,
     RoomJoinIn,
@@ -157,3 +162,128 @@ async def get_messages(
         )
     rows = await messages_after(session, room_id, after_seq)
     return [MessageOut.model_validate(m) for m in rows]
+
+
+# ---- 角色卡（Phase A）：玩家卡 + NPC 卡 ----
+
+
+async def _require_member(
+    session: AsyncSession, room_id: int, user_id: int
+) -> None:
+    if not await is_member(session, room_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
+        )
+
+
+def _member_card(m: RoomMember, display_name: str) -> MemberOut:
+    return MemberOut(
+        user_id=m.user_id,
+        display_name=display_name,
+        character_name=m.character_name,
+        appearance=m.appearance,
+        persona=m.persona,
+        voice_id=m.voice_id,
+    )
+
+
+@router.get("/rooms/{room_id}/cards", response_model=CardsOut)
+async def list_cards(
+    room_id: int, user: CurrentUser, session: SessionDep
+) -> CardsOut:
+    await _require_member(session, room_id, user.id)
+    members = (
+        await session.scalars(
+            select(RoomMember).where(RoomMember.room_id == room_id)
+        )
+    ).all()
+    npcs = (
+        await session.scalars(
+            select(NpcCard).where(NpcCard.room_id == room_id)
+        )
+    ).all()
+    return CardsOut(
+        players=[_member_card(m, m.user.display_name) for m in members],
+        npcs=[NpcCardOut.model_validate(n) for n in npcs],
+    )
+
+
+@router.put("/rooms/{room_id}/me-card", response_model=MemberOut)
+async def update_my_card(
+    room_id: int, body: MeCardUpdateIn, user: CurrentUser, session: SessionDep
+) -> MemberOut:
+    member = await session.scalar(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
+        )
+    if body.character_name is not None:
+        member.character_name = body.character_name
+    if body.persona is not None:
+        member.persona = body.persona
+    if body.appearance is not None:
+        member.appearance = body.appearance
+    if body.voice_id is not None:
+        member.voice_id = body.voice_id
+    await session.commit()
+    await session.refresh(member)
+    return _member_card(member, user.display_name)
+
+
+@router.post("/rooms/{room_id}/npcs", response_model=NpcCardOut)
+async def create_npc(
+    room_id: int, body: NpcCardIn, user: CurrentUser, session: SessionDep
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = NpcCard(
+        room_id=room_id,
+        name=body.name,
+        persona=body.persona,
+        appearance=body.appearance,
+        voice_id=body.voice_id,
+        created_by=user.id,
+        created_by_ai=False,
+    )
+    session.add(npc)
+    await session.commit()
+    await session.refresh(npc)
+    return NpcCardOut.model_validate(npc)
+
+
+@router.put("/rooms/{room_id}/npcs/{npc_id}", response_model=NpcCardOut)
+async def update_npc(
+    room_id: int,
+    npc_id: int,
+    body: NpcCardIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
+        )
+    npc.name = body.name
+    npc.persona = body.persona
+    npc.appearance = body.appearance
+    npc.voice_id = body.voice_id
+    await session.commit()
+    await session.refresh(npc)
+    return NpcCardOut.model_validate(npc)
+
+
+@router.delete("/rooms/{room_id}/npcs/{npc_id}")
+async def delete_npc(
+    room_id: int, npc_id: int, user: CurrentUser, session: SessionDep
+) -> dict[str, str]:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is not None and npc.room_id == room_id:
+        await session.delete(npc)
+        await session.commit()
+    return {"status": "ok"}

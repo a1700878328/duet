@@ -38,6 +38,8 @@ class MemberOut(BaseModel):
     display_name: str
     character_name: str
     appearance: str | None = None
+    persona: str | None = None
+    voice_id: str | None = None
 
 
 class RoomOut(BaseModel):
@@ -59,6 +61,36 @@ class RoomCreateIn(BaseModel):
 class RoomJoinIn(BaseModel):
     character_name: str = Field(min_length=1, max_length=128)
     appearance: str | None = Field(default=None, max_length=512)
+
+
+class MeCardUpdateIn(BaseModel):
+    character_name: str | None = Field(default=None, max_length=128)
+    persona: str | None = Field(default=None, max_length=4000)
+    appearance: str | None = Field(default=None, max_length=512)
+    voice_id: str | None = Field(default=None, max_length=64)
+
+
+class NpcCardIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    persona: str = Field(default="", max_length=4000)
+    appearance: str | None = Field(default=None, max_length=512)
+    voice_id: str | None = Field(default=None, max_length=64)
+
+
+class NpcCardOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    persona: str
+    appearance: str | None = None
+    voice_id: str | None = None
+    created_by_ai: bool
+
+
+class CardsOut(BaseModel):
+    players: list[MemberOut]
+    npcs: list[NpcCardOut]
 
 
 class MessageOut(BaseModel):

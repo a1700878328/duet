@@ -8,6 +8,7 @@ def build_system_prompt(room: Room, members: list[RoomMember]) -> str:
     if members:
         roster = "\n".join(
             f"- 真人玩家「{m.user.display_name}」扮演角色：{m.character_name}"
+            + (f"（设定：{m.persona}）" if getattr(m, "persona", None) else "")
             for m in members
         )
         forbidden = "、".join(f"「{m.character_name}」" for m in members)

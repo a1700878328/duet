@@ -64,6 +64,11 @@ class RoomMember(Base):
     appearance: Mapped[str | None] = mapped_column(
         String(512), nullable=True, default=None
     )
+    # 角色卡升级：性格/说话风格/背景（喂提示词），声音（per-玩家 TTS）。
+    persona: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    voice_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
     joined_at: Mapped[datetime] = mapped_column(default=_now)
 
     room: Mapped["Room"] = relationship(back_populates="members")
@@ -82,10 +87,33 @@ class Message(Base):
         ForeignKey("rooms.id"), index=True
     )
     seq: Mapped[int] = mapped_column(Integer)
-    author_type: Mapped[str] = mapped_column(String(16))  # user | ai | system
+    author_type: Mapped[str] = mapped_column(String(16))  # user | ai | system | image
     author_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
     speaker_label: Mapped[str] = mapped_column(String(128))
     content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class NpcCard(Base):
+    """NPC 角色卡：AI 据世界卡生成 或 玩家手建/编辑。B 阶段用于各 NPC 独立发言。"""
+
+    __tablename__ = "npc_cards"
+    __table_args__ = (Index("ix_npc_card_room", "room_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    persona: Mapped[str] = mapped_column(Text, default="")
+    appearance: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None
+    )
+    voice_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    created_by_ai: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=_now)
