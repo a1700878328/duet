@@ -24,6 +24,7 @@ async def room_to_out(session: AsyncSession, room: Room) -> RoomOut:
                 user_id=m.user_id,
                 display_name=m.user.display_name,
                 character_name=m.character_name,
+                appearance=m.appearance,
             )
             for m in members
         ],

@@ -60,6 +60,10 @@ class RoomMember(Base):
         ForeignKey("users.id"), primary_key=True
     )
     character_name: Mapped[str] = mapped_column(String(128))
+    # 外貌卡：自然语言外貌（发色/瞳色/服装…），生图时织入 prompt 保一致。None=不指定。
+    appearance: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None
+    )
     joined_at: Mapped[datetime] = mapped_column(default=_now)
 
     room: Mapped["Room"] = relationship(back_populates="members")

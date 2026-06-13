@@ -21,11 +21,20 @@ from .registry import (
     build_character_prompt,
     resolve,
 )
-from .service import generate_duo, generate_single
+from .scene_prompt import build_scene_prompt
+from .service import (
+    generate_duo,
+    generate_raw_duo,
+    generate_raw_single,
+    generate_single,
+)
 
 __all__ = [
     "generate_single",
     "generate_duo",
+    "generate_raw_single",
+    "generate_raw_duo",
+    "build_scene_prompt",
     "resolve",
     "build_character_prompt",
     "UnverifiedCharacter",

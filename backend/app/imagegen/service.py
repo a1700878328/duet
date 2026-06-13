@@ -12,9 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from .client import ensure_comfyui, restart_comfyui, submit_and_wait
-from .guard import PoisonedPromptError, UnverifiedNamedCharacter
+from .guard import (
+    PoisonedPromptError,
+    UnverifiedNamedCharacter,
+    assert_no_poisoned_colors,
+)
 from .registry import UnverifiedCharacter
-from .workflows import build_duo_workflow, build_single_workflow
+from .workflows import (
+    build_duo_workflow,
+    build_raw_duo_workflow,
+    build_raw_single_workflow,
+    build_single_workflow,
+)
 
 MEDIA_DIR = Path(__file__).resolve().parents[1] / "media" / "generated"
 MEDIA_URL_PREFIX = "/media/generated"
@@ -62,6 +71,53 @@ async def generate_single(
     try:
         workflow = build_single_workflow(char_name, scene, seed=seed, nsfw=nsfw)
     except (UnverifiedCharacter, ValueError) as e:
+        return {"error": str(e)}
+    try:
+        return await _run(workflow)
+    except (PoisonedPromptError, UnverifiedNamedCharacter) as e:
+        return {"error": str(e)}
+
+
+async def generate_raw_single(
+    positive: str,
+    negative: str = "",
+    *,
+    nsfw: bool = False,
+    landscape: bool = False,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """LoRA-less raw single. Returns {url,path,filename,prompt_id}|{error}."""
+    body = f"(nsfw:1.2), {positive}" if nsfw else positive
+    try:
+        assert_no_poisoned_colors([body])
+        workflow = build_raw_single_workflow(
+            body, negative, landscape=landscape, seed=seed
+        )
+    except (PoisonedPromptError, UnverifiedNamedCharacter, ValueError) as e:
+        return {"error": str(e)}
+    try:
+        return await _run(workflow)
+    except (PoisonedPromptError, UnverifiedNamedCharacter) as e:
+        return {"error": str(e)}
+
+
+async def generate_raw_duo(
+    positive_global: str,
+    positive_left: str,
+    positive_right: str,
+    negative: str = "",
+    *,
+    nsfw: bool = False,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """LoRA-less raw duo. Returns {url,path,filename,prompt_id}|{error}."""
+    g = f"(nsfw:1.2), {positive_global}" if nsfw else positive_global
+    try:
+        assert_no_poisoned_colors([g, positive_left, positive_right])
+        workflow = build_raw_duo_workflow(
+            g, positive_left, positive_right, negative, seed=seed
+        )
+    except (PoisonedPromptError, UnverifiedNamedCharacter, ValueError) as e:
         return {"error": str(e)}
     try:
         return await _run(workflow)

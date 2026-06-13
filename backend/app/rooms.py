@@ -110,6 +110,7 @@ async def create_room(
             room_id=room.id,
             user_id=user.id,
             character_name=body.character_name,
+            appearance=body.appearance,
         )
     )
     await session.commit()
@@ -135,6 +136,7 @@ async def join_room(
                 room_id=room_id,
                 user_id=user.id,
                 character_name=body.character_name,
+                appearance=body.appearance,
             )
         )
         await session.commit()

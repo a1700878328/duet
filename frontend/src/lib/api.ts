@@ -108,9 +108,13 @@ export const api = {
     name: string;
     character_name: string;
     world_card?: string | null;
+    appearance?: string | null;
   }) => request<Room>("/rooms", { method: "POST", body: JSON.stringify(body) }),
 
-  joinRoom: (id: string, body: { character_name: string }) =>
+  joinRoom: (
+    id: string,
+    body: { character_name: string; appearance?: string | null },
+  ) =>
     request<Room>(`/rooms/${id}/join`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -119,6 +123,11 @@ export const api = {
   messages: (id: string, afterSeq = 0) =>
     request<Message[]>(`/rooms/${id}/messages?after_seq=${afterSeq}`),
 };
+
+// Resolve a server-relative asset path (e.g. /media/...) against the API origin.
+export function assetUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
 
 // WebSocket URL builder. Resolves relative to API_BASE (or current origin in dev).
 export function roomSocketUrl(roomId: string, token: string): string {

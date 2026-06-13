@@ -37,6 +37,7 @@ class MemberOut(BaseModel):
     user_id: int
     display_name: str
     character_name: str
+    appearance: str | None = None
 
 
 class RoomOut(BaseModel):
@@ -52,10 +53,12 @@ class RoomCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     character_name: str = Field(min_length=1, max_length=128)
     world_card: str | None = Field(default=None, max_length=32)
+    appearance: str | None = Field(default=None, max_length=512)
 
 
 class RoomJoinIn(BaseModel):
     character_name: str = Field(min_length=1, max_length=128)
+    appearance: str | None = Field(default=None, max_length=512)
 
 
 class MessageOut(BaseModel):

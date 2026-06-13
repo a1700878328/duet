@@ -24,6 +24,7 @@ export function RoomPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState(false);
+  const [nsfw, setNsfw] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -40,8 +41,18 @@ export function RoomPage() {
     [showToast],
   );
 
-  const { status, messages, streaming, presence, aiBusy, say, advance, setTyping } =
-    useRoomSocket({ roomId, token: token ?? "", onError: handleWsError });
+  const {
+    status,
+    messages,
+    streaming,
+    presence,
+    aiBusy,
+    imaging,
+    say,
+    advance,
+    requestImage,
+    setTyping,
+  } = useRoomSocket({ roomId, token: token ?? "", onError: handleWsError });
 
   // Load room metadata for header.
   useEffect(() => {
@@ -195,6 +206,13 @@ export function RoomPage() {
             AI 接话中…
           </div>
         )}
+
+        {imaging && (
+          <div className="streaming-hint">
+            <span className="pulse" />
+            生成场景图中…（约 30–60 秒）
+          </div>
+        )}
       </div>
 
       <div className="composer">
@@ -217,6 +235,29 @@ export function RoomPage() {
             "让 AI 接话"
           )}
         </button>
+        <button
+          className="btn"
+          onClick={() => requestImage(nsfw)}
+          disabled={imaging || status !== "open"}
+          title="根据当前剧情生成一张场景图"
+        >
+          {imaging ? (
+            <>
+              <span className="spinner" />
+              生成图中…
+            </>
+          ) : (
+            "🎨 生成图"
+          )}
+        </button>
+        <label className="toggle" title="生成 R18 图">
+          <input
+            type="checkbox"
+            checked={nsfw}
+            onChange={(e) => setNsfw(e.target.checked)}
+          />
+          <span>R18</span>
+        </label>
       </div>
 
       {toast && <div className="toast">{toast}</div>}

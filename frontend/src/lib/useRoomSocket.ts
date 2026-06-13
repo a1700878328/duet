@@ -20,8 +20,10 @@ interface UseRoomSocketResult {
   streaming: StreamingTurn | null;
   presence: Map<string, boolean>;
   aiBusy: boolean;
+  imaging: boolean;
   say: (content: string) => void;
   advance: () => void;
+  requestImage: (nsfw: boolean) => void;
   setTyping: (isTyping: boolean) => void;
 }
 
@@ -42,6 +44,7 @@ export function useRoomSocket({
   const [streaming, setStreaming] = useState<StreamingTurn | null>(null);
   const [presence, setPresence] = useState<Map<string, boolean>>(new Map());
   const [aiBusy, setAiBusy] = useState(false);
+  const [imaging, setImaging] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastSeqRef = useRef(0);
@@ -81,6 +84,10 @@ export function useRoomSocket({
           break;
         case "message":
           mergeMessages([event.message]);
+          if (event.message.author_type === "image") setImaging(false);
+          break;
+        case "image_pending":
+          setImaging(true);
           break;
         case "ai_delta":
           setAiBusy(true);
@@ -121,6 +128,8 @@ export function useRoomSocket({
           break;
         case "error":
           if (event.code === "ai_busy") setAiBusy(false);
+          if (event.code === "image_failed" || event.code === "image_busy")
+            setImaging(false);
           onErrorRef.current?.(event.code, event.detail);
           break;
       }
@@ -202,6 +211,14 @@ export function useRoomSocket({
     send({ type: "advance" });
   }, [send]);
 
+  const requestImage = useCallback(
+    (nsfw: boolean) => {
+      setImaging(true);
+      send({ type: "image", nsfw });
+    },
+    [send],
+  );
+
   const setTyping = useCallback(
     (isTyping: boolean) => send({ type: "typing", is_typing: isTyping }),
     [send],
@@ -213,8 +230,10 @@ export function useRoomSocket({
     streaming,
     presence,
     aiBusy,
+    imaging,
     say,
     advance,
+    requestImage,
     setTyping,
   };
 }

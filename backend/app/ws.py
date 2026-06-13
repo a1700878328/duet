@@ -16,6 +16,8 @@ from .brain import BrainProvider, default_provider
 from .config import settings
 from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
+from .imagegen.scene_prompt import build_scene_prompt
+from .imagegen.service import generate_raw_duo, generate_raw_single
 from .lore import store as lore_store
 from .models import Message, Room, RoomMember, User
 from .prompts import build_system_prompt, history_to_messages
@@ -34,6 +36,7 @@ class RoomCoordinator:
         self.sockets: dict[WebSocket, User] = {}
         self.lock = asyncio.Lock()
         self.ai_busy = False
+        self.image_busy = False
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         stale: list[WebSocket] = []
@@ -252,6 +255,88 @@ async def _handle_advance(coord: RoomCoordinator) -> None:
         coord.ai_busy = False
 
 
+async def _handle_image(
+    coord: RoomCoordinator, user: User, data: dict[str, Any]
+) -> None:
+    """生图房间动作：最近剧情 + 外貌卡 → 合成 prompt → raw 生成 → 广播图消息。
+
+    ~40s，跑成后台任务，不阻塞聊天；image_busy 防并发。
+    """
+    if coord.image_busy:
+        await coord.broadcast(
+            {"type": "error", "code": "image_busy", "detail": "上一张图还在生成"}
+        )
+        return
+    coord.image_busy = True
+    nsfw = bool(data.get("nsfw"))
+    await coord.broadcast(
+        {
+            "type": "image_pending",
+            "user_id": user.id,
+            "display_name": user.display_name,
+        }
+    )
+    try:
+        async with SessionFactory() as session:
+            members = list(
+                await session.scalars(
+                    select(RoomMember).where(RoomMember.room_id == coord.room_id)
+                )
+            )
+            history = await messages_after(session, coord.room_id, 0, limit=200)
+        scene_text = (
+            "\n".join(
+                f"{m.speaker_label}: {m.content}"
+                for m in history[-6:]
+                if m.author_type in {"user", "ai"}
+            )
+            or "一个角色扮演场景"
+        )
+        appearances = [(m.appearance or m.character_name) for m in members][:2]
+        two_person = len(members) >= 2
+        try:
+            prompt = await build_scene_prompt(
+                scene_text, appearances, nsfw=nsfw, two_person=two_person
+            )
+            if two_person:
+                res = await generate_raw_duo(
+                    prompt.get("global", ""),
+                    prompt.get("left", ""),
+                    prompt.get("right", ""),
+                    prompt.get("negative", ""),
+                    nsfw=nsfw,
+                )
+            else:
+                res = await generate_raw_single(
+                    prompt.get("positive", ""),
+                    prompt.get("negative", ""),
+                    nsfw=nsfw,
+                )
+        except Exception as exc:  # noqa: BLE001 — surface as room error
+            res = {"error": str(exc)}
+
+        url = res.get("url")
+        if url:
+            msg = await _persist_message(
+                room_id=coord.room_id,
+                author_type="image",
+                speaker_label="场景图",
+                content=url,
+                author_user_id=user.id,
+            )
+            await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+        else:
+            await coord.broadcast(
+                {
+                    "type": "error",
+                    "code": "image_failed",
+                    "detail": res.get("error", "生成失败"),
+                }
+            )
+    finally:
+        coord.image_busy = False
+
+
 @router.websocket("/ws/rooms/{room_id}")
 async def room_ws(websocket: WebSocket, room_id: int) -> None:
     token = websocket.query_params.get("token", "")
@@ -296,6 +381,8 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
                     await _handle_say(coord, user, data.get("content", ""))
             elif kind == "advance":
                 await _handle_advance(coord)
+            elif kind == "image":
+                asyncio.create_task(_handle_image(coord, user, data))
             elif kind == "typing":
                 await coord.broadcast(
                     {

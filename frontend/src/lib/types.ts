@@ -13,6 +13,7 @@ export interface RoomMember {
   user_id: string;
   display_name: string;
   character_name: string;
+  appearance?: string | null;
 }
 
 export type AiMode = "manual" | "auto";
@@ -26,7 +27,7 @@ export interface Room {
   members: RoomMember[];
 }
 
-export type AuthorType = "user" | "ai" | "system";
+export type AuthorType = "user" | "ai" | "system" | "image";
 
 export interface Message {
   id: string;
@@ -79,17 +80,25 @@ export interface WsError {
   detail: string;
 }
 
+export interface WsImagePending {
+  type: "image_pending";
+  user_id: string;
+  display_name: string;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
   | WsAiDelta
   | WsAiDone
   | WsPresence
+  | WsImagePending
   | WsError;
 
 export type WsClientEvent =
   | { type: "say"; content: string }
   | { type: "advance" }
+  | { type: "image"; nsfw: boolean }
   | { type: "typing"; is_typing: boolean };
 
 export type ConnectionStatus = "connecting" | "open" | "closed";

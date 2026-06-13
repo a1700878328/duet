@@ -1,3 +1,4 @@
+import { assetUrl } from "../lib/api";
 import type { Message } from "../lib/types";
 
 interface Props {
@@ -13,6 +14,31 @@ export function MessageBubble({ message, isMe, streaming = false }: Props) {
     return (
       <div className="bubble-row system">
         <div className="bubble">{content}</div>
+      </div>
+    );
+  }
+
+  if (author_type === "image") {
+    return (
+      <div className={`bubble-row ${isMe ? "me" : "other"}`}>
+        {!isMe && <div className="speaker">{speaker_label || "场景图"}</div>}
+        <a
+          className="image-bubble"
+          href={assetUrl(content)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img
+            src={assetUrl(content)}
+            alt="场景图"
+            loading="lazy"
+            style={{
+              maxWidth: "min(360px, 80vw)",
+              borderRadius: 12,
+              display: "block",
+            }}
+          />
+        </a>
       </div>
     );
   }
