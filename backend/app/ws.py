@@ -16,6 +16,7 @@ from .brain import BrainProvider, default_provider
 from .config import settings
 from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
+from .director import direct_beat
 from .imagegen.scene_prompt import build_scene_prompt
 from .imagegen.service import generate_raw_duo, generate_raw_single
 from .lore import store as lore_store
@@ -296,6 +297,80 @@ async def _handle_advance(
         coord.ai_busy = False
 
 
+async def _handle_director_beat(
+    coord: RoomCoordinator, *, force_timeskip: bool = False
+) -> None:
+    """导演拍：决定哪些 NPC 反应 + 是否推进叙事时间，再逐个让 NPC 发言。"""
+    if coord.ai_busy:
+        await coord.broadcast(
+            {"type": "error", "code": "ai_busy", "detail": "上一拍还没演完"}
+        )
+        return
+    coord.ai_busy = True
+    try:
+        async with SessionFactory() as session:
+            room = await session.get(Room, coord.room_id)
+            if room is None:
+                return
+            members = list(
+                await session.scalars(
+                    select(RoomMember).where(RoomMember.room_id == coord.room_id)
+                )
+            )
+            npcs = list(
+                await session.scalars(
+                    select(NpcCard).where(NpcCard.room_id == coord.room_id)
+                )
+            )
+            history = await messages_after(session, coord.room_id, 0, limit=200)
+            world_card = room.world_card
+
+        if not npcs:
+            await _run_ai_turn(coord, None)
+            return
+
+        recent = "\n".join(
+            f"{m.speaker_label}: {m.content}"
+            for m in history[-8:]
+            if m.author_type in {"user", "ai"}
+        )
+        plan = await direct_beat(
+            world_card, members, npcs, recent, force_timeskip=force_timeskip
+        )
+
+        if plan.get("time_jump"):
+            summary = plan["time_jump"]
+            msg = await _persist_message(
+                room_id=coord.room_id,
+                author_type="ai",
+                speaker_label="旁白",
+                content=f"⏳ {summary}",
+                author_user_id=None,
+            )
+            await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+            asyncio.create_task(
+                asyncio.to_thread(
+                    memory_store.remember,
+                    f"room_{coord.room_id}",
+                    "[时间推进]",
+                    summary,
+                )
+            )
+
+        by_id = {n.id: n for n in npcs}
+        acted = False
+        for npc_id in plan.get("acts", []):
+            npc = by_id.get(npc_id)
+            if npc is not None:
+                await _run_ai_turn(coord, npc)
+                acted = True
+
+        if not acted and not plan.get("time_jump"):
+            await _run_ai_turn(coord, None)
+    finally:
+        coord.ai_busy = False
+
+
 async def _handle_image(
     coord: RoomCoordinator, user: User, data: dict[str, Any]
 ) -> None:
@@ -421,9 +496,9 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
                 async with coord.lock:
                     await _handle_say(coord, user, data.get("content", ""))
             elif kind == "advance":
-                npc = None
                 npc_id = data.get("npc_id")
                 if npc_id is not None:
+                    npc = None
                     try:
                         async with SessionFactory() as session:
                             cand = await session.get(NpcCard, int(npc_id))
@@ -431,7 +506,12 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
                             npc = cand
                     except (ValueError, TypeError):
                         npc = None
-                await _handle_advance(coord, npc)
+                    await _handle_advance(coord, npc)
+                else:
+                    # 无指定 NPC → 导演自动调度本拍谁反应。
+                    await _handle_director_beat(coord)
+            elif kind == "timeskip":
+                await _handle_director_beat(coord, force_timeskip=True)
             elif kind == "image":
                 asyncio.create_task(_handle_image(coord, user, data))
             elif kind == "typing":
