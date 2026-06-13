@@ -14,6 +14,33 @@ export interface RoomMember {
   display_name: string;
   character_name: string;
   appearance?: string | null;
+  persona?: string | null;
+  voice_id?: string | null;
+}
+
+// A character card for a member (player). Returned by GET /rooms/{id}/cards.
+export interface MemberCard {
+  user_id: number;
+  display_name: string;
+  character_name: string;
+  appearance: string | null;
+  persona: string | null;
+  voice_id: string | null;
+}
+
+// An NPC card living in a room (AI- or hand-authored).
+export interface NpcCard {
+  id: number;
+  name: string;
+  persona: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+  created_by_ai: boolean;
+}
+
+export interface RoomCards {
+  players: MemberCard[];
+  npcs: NpcCard[];
 }
 
 export type AiMode = "manual" | "auto";
@@ -97,7 +124,7 @@ export type WsServerEvent =
 
 export type WsClientEvent =
   | { type: "say"; content: string }
-  | { type: "advance" }
+  | { type: "advance"; npc_id?: number }
   | { type: "image"; nsfw: boolean }
   | { type: "typing"; is_typing: boolean };
 

@@ -22,7 +22,7 @@ interface UseRoomSocketResult {
   aiBusy: boolean;
   imaging: boolean;
   say: (content: string) => void;
-  advance: () => void;
+  advance: (npcId?: number) => void;
   requestImage: (nsfw: boolean) => void;
   setTyping: (isTyping: boolean) => void;
 }
@@ -206,10 +206,17 @@ export function useRoomSocket({
     [send],
   );
 
-  const advance = useCallback(() => {
-    setAiBusy(true);
-    send({ type: "advance" });
-  }, [send]);
+  const advance = useCallback(
+    (npcId?: number) => {
+      setAiBusy(true);
+      send(
+        npcId !== undefined
+          ? { type: "advance", npc_id: npcId }
+          : { type: "advance" },
+      );
+    },
+    [send],
+  );
 
   const requestImage = useCallback(
     (nsfw: boolean) => {

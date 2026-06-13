@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { CardPanel } from "../components/CardPanel";
 import { Composer } from "../components/Composer";
 import { MessageBubble } from "../components/MessageBubble";
 import { api, ApiError } from "../lib/api";
@@ -25,6 +26,7 @@ export function RoomPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState(false);
   const [nsfw, setNsfw] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -146,6 +148,14 @@ export function RoomPage() {
                 ? "连接中"
                 : "已断开"}
           </span>
+          <button
+            className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
+            onClick={() => setPanelOpen((v) => !v)}
+            aria-pressed={panelOpen}
+            title="角色卡与登场 NPC"
+          >
+            🎭 角色
+          </button>
         </div>
 
         <div className="room-header-top">
@@ -223,7 +233,7 @@ export function RoomPage() {
         />
         <button
           className="btn btn-primary advance-btn"
-          onClick={advance}
+          onClick={() => advance()}
           disabled={aiBusy || status !== "open"}
         >
           {aiBusy ? (
@@ -259,6 +269,19 @@ export function RoomPage() {
           <span>R18</span>
         </label>
       </div>
+
+      <CardPanel
+        roomId={roomId}
+        myUserId={user?.id}
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        aiBusy={aiBusy}
+        onError={showToast}
+        onNpcSpeak={(npcId) => {
+          advance(npcId);
+          setPanelOpen(false);
+        }}
+      />
 
       {toast && <div className="toast">{toast}</div>}
     </div>

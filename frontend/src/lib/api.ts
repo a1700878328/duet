@@ -1,4 +1,31 @@
-import type { AuthResponse, Message, Room, User } from "./types";
+import type {
+  AuthResponse,
+  MemberCard,
+  Message,
+  NpcCard,
+  Room,
+  RoomCards,
+  User,
+} from "./types";
+
+export interface MeCardBody {
+  character_name?: string;
+  persona?: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+}
+
+export interface NpcBody {
+  name: string;
+  persona: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+}
+
+export interface GenerateNpcsBody {
+  count?: number;
+  hint?: string;
+}
 
 // Empty base => same-origin (dev proxy / FastAPI static hosting / native shell same host).
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -122,6 +149,40 @@ export const api = {
 
   messages: (id: string, afterSeq = 0) =>
     request<Message[]>(`/rooms/${id}/messages?after_seq=${afterSeq}`),
+
+  // ---- character cards / NPCs ----
+
+  getCards: (roomId: string) =>
+    request<RoomCards>(`/rooms/${roomId}/cards`),
+
+  updateMeCard: (roomId: string, body: MeCardBody) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  createNpc: (roomId: string, body: NpcBody) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  generateNpcs: (roomId: string, body: GenerateNpcsBody) =>
+    request<NpcCard[]>(`/rooms/${roomId}/npcs/generate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateNpc: (roomId: string, npcId: number, body: NpcBody) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteNpc: (roomId: string, npcId: number) =>
+    request<{ status: string }>(`/rooms/${roomId}/npcs/${npcId}`, {
+      method: "DELETE",
+    }),
 };
 
 // Resolve a server-relative asset path (e.g. /media/...) against the API origin.
