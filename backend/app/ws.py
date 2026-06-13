@@ -19,6 +19,7 @@ from .db import SessionFactory
 from .imagegen.scene_prompt import build_scene_prompt
 from .imagegen.service import generate_raw_duo, generate_raw_single
 from .lore import store as lore_store
+from .memory import store as memory_store
 from .models import Message, Room, RoomMember, User
 from .prompts import build_system_prompt, history_to_messages
 from .schemas import MessageOut
@@ -161,17 +162,24 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
         system_prompt, history, window=settings.history_window
     )
     forbidden = [m.character_name for m in members if m.character_name]
+    scope = f"room_{coord.room_id}"
+    recent = " ".join(
+        m.content for m in history[-5:] if m.author_type == "user"
+    )[:600].strip()
+
+    # 长期记忆召回：注入与当前对话相关的历史事实（剧情/角色/关系）。
+    if recent:
+        recall = await asyncio.to_thread(memory_store.search, scope, recent, 4)
+        if recall:
+            messages.insert(1, {"role": "system", "content": recall})
+            print(f"[MEM] room={coord.room_id} 召回 {len(recall)}c", flush=True)
 
     # 世界卡 lore RAG：按最近对话检索相关设定片段，注入为附加 system 消息。
-    if world_card == "ksim":
-        recent = " ".join(
-            m.content for m in history[-5:] if m.author_type == "user"
-        )[:600]
-        if recent.strip():
-            lore = await asyncio.to_thread(lore_store.search_formatted, recent, 4)
-            if lore:
-                messages.insert(1, {"role": "system", "content": lore})
-                print(f"[LORE] room={coord.room_id} +{len(lore)}c", flush=True)
+    if world_card == "ksim" and recent:
+        lore = await asyncio.to_thread(lore_store.search_formatted, recent, 4)
+        if lore:
+            messages.insert(1, {"role": "system", "content": lore})
+            print(f"[LORE] room={coord.room_id} +{len(lore)}c", flush=True)
 
     finish_reason = "stop"
     guard: dict[str, Any] = {}
@@ -219,6 +227,15 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
             "finish_reason": finish_reason,
         }
     )
+
+    # 后台写入长期记忆（best-effort，不挡主路）：让 mem0 从本回合抽取耐久事实。
+    last_user = next(
+        (m.content for m in reversed(history) if m.author_type == "user"), ""
+    )
+    if last_user and finish_reason in {"stop", "empty"}:
+        asyncio.create_task(
+            asyncio.to_thread(memory_store.remember, scope, last_user, content)
+        )
 
 
 async def _handle_say(coord: RoomCoordinator, user: User, content: str) -> None:

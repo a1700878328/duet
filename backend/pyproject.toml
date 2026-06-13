@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "fastembed>=0.8.0",
     "chromadb>=1.5.9",
+    "mem0ai>=2.0.4",
 ]
 
 [dependency-groups]
