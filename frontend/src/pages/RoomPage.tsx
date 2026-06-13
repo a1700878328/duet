@@ -52,6 +52,7 @@ export function RoomPage() {
     imaging,
     say,
     advance,
+    timeskip,
     requestImage,
     setTyping,
   } = useRoomSocket({ roomId, token: token ?? "", onError: handleWsError });
@@ -244,6 +245,14 @@ export function RoomPage() {
           ) : (
             "让 AI 接话"
           )}
+        </button>
+        <button
+          className="btn"
+          onClick={() => timeskip()}
+          disabled={aiBusy || status !== "open"}
+          title="推进剧情时间：跳过一段时间，NPC 各自行动、世界演进"
+        >
+          ⏩ 推进时间
         </button>
         <button
           className="btn"

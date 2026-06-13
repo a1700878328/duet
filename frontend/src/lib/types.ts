@@ -125,6 +125,7 @@ export type WsServerEvent =
 export type WsClientEvent =
   | { type: "say"; content: string }
   | { type: "advance"; npc_id?: number }
+  | { type: "timeskip" }
   | { type: "image"; nsfw: boolean }
   | { type: "typing"; is_typing: boolean };
 

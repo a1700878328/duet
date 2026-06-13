@@ -23,6 +23,7 @@ interface UseRoomSocketResult {
   imaging: boolean;
   say: (content: string) => void;
   advance: (npcId?: number) => void;
+  timeskip: () => void;
   requestImage: (nsfw: boolean) => void;
   setTyping: (isTyping: boolean) => void;
 }
@@ -218,6 +219,11 @@ export function useRoomSocket({
     [send],
   );
 
+  const timeskip = useCallback(() => {
+    setAiBusy(true);
+    send({ type: "timeskip" });
+  }, [send]);
+
   const requestImage = useCallback(
     (nsfw: boolean) => {
       setImaging(true);
@@ -240,6 +246,7 @@ export function useRoomSocket({
     imaging,
     say,
     advance,
+    timeskip,
     requestImage,
     setTyping,
   };
