@@ -36,13 +36,14 @@ export function RoomsPage() {
 
   async function createRoom(e: FormEvent) {
     e.preventDefault();
-    if (!newName.trim() || !newChar.trim()) return;
     setBusy(true);
     setError(null);
     try {
+      const name = newName.trim() || `${user?.display_name ?? "我"}的房间`;
+      const character = newChar.trim() || user?.display_name || "玩家";
       const room = await api.createRoom({
-        name: newName.trim(),
-        character_name: newChar.trim(),
+        name,
+        character_name: character,
         world_card: newWorld || null,
       });
       navigate(`/rooms/${room.id}`);
@@ -54,12 +55,12 @@ export function RoomsPage() {
 
   async function joinRoom(e: FormEvent) {
     e.preventDefault();
-    if (!joinId.trim() || !joinChar.trim()) return;
+    if (!joinId.trim()) return;
     setBusy(true);
     setError(null);
     try {
       const room = await api.joinRoom(joinId.trim(), {
-        character_name: joinChar.trim(),
+        character_name: joinChar.trim() || user?.display_name || "玩家",
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
@@ -87,13 +88,13 @@ export function RoomsPage() {
         <form className="inline-form" onSubmit={createRoom}>
           <input
             className="input"
-            placeholder="房间名"
+            placeholder={`房间名（留空＝${user?.display_name ?? "我"}的房间）`}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
           <input
             className="input"
-            placeholder="我的角色名"
+            placeholder="你扮演的角色名（留空＝用昵称）"
             value={newChar}
             onChange={(e) => setNewChar(e.target.value)}
           />
@@ -110,6 +111,10 @@ export function RoomsPage() {
             创建
           </button>
         </form>
+        <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+          「角色名」＝你在这场戏里扮演的人物（如 艾琳、卡尔），AI
+          会这样称呼你；不确定就留空，用你的昵称。世界卡＝这场戏的背景设定。
+        </p>
       </div>
 
       <div className="panel">
@@ -123,7 +128,7 @@ export function RoomsPage() {
           />
           <input
             className="input"
-            placeholder="我的角色名"
+            placeholder="你扮演的角色名（留空＝用昵称）"
             value={joinChar}
             onChange={(e) => setJoinChar(e.target.value)}
           />

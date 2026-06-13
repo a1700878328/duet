@@ -9,3 +9,4 @@ node_modules/
 ComfyUI/output/
 backend/eval/ledger/
 backend/lore/chroma/
+backend/app/media/

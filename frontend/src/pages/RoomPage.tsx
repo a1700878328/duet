@@ -50,7 +50,8 @@ export function RoomPage() {
       .listRooms()
       .then((rooms) => {
         if (!active) return;
-        const found = rooms.find((r) => r.id === roomId) ?? null;
+        const found =
+          rooms.find((r) => String(r.id) === String(roomId)) ?? null;
         setRoom(found);
         if (!found) setLoadError("未找到房间，或你不在其中。");
       })
