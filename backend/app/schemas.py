@@ -1,0 +1,73 @@
+"""Pydantic v2 request/response schemas."""
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: str
+
+
+class RegisterIn(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=4, max_length=256)
+    display_name: str = Field(min_length=1, max_length=128)
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class AuthOut(BaseModel):
+    token: str
+    user: UserOut
+
+
+class MeOut(BaseModel):
+    user: UserOut
+
+
+class MemberOut(BaseModel):
+    user_id: int
+    display_name: str
+    character_name: str
+
+
+class RoomOut(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+    ai_mode: str
+    members: list[MemberOut]
+
+
+class RoomCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    character_name: str = Field(min_length=1, max_length=128)
+
+
+class RoomJoinIn(BaseModel):
+    character_name: str = Field(min_length=1, max_length=128)
+
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    room_id: int
+    seq: int
+    author_type: str
+    author_user_id: int | None
+    speaker_label: str
+    content: str
+    created_at: datetime
+
+
+class HealthOut(BaseModel):
+    status: str = "ok"
