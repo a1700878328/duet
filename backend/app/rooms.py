@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .crud import is_member, messages_after, room_to_out
 from .db import get_session
 from .models import NpcCard, Room, RoomMember, User
+from .npc_gen import generate_npcs
 from .schemas import (
     AuthOut,
     CardsOut,
@@ -21,6 +22,7 @@ from .schemas import (
     MessageOut,
     NpcCardIn,
     NpcCardOut,
+    NpcGenIn,
     RegisterIn,
     RoomCreateIn,
     RoomJoinIn,
@@ -252,6 +254,41 @@ async def create_npc(
     await session.commit()
     await session.refresh(npc)
     return NpcCardOut.model_validate(npc)
+
+
+@router.post("/rooms/{room_id}/npcs/generate", response_model=list[NpcCardOut])
+async def generate_npcs_endpoint(
+    room_id: int, body: NpcGenIn, user: CurrentUser, session: SessionDep
+) -> list[NpcCardOut]:
+    await _require_member(session, room_id, user.id)
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
+        )
+    existing = list(
+        await session.scalars(
+            select(NpcCard.name).where(NpcCard.room_id == room_id)
+        )
+    )
+    cards = await generate_npcs(room.world_card, body.hint, existing, body.count)
+    created: list[NpcCard] = []
+    for c in cards:
+        npc = NpcCard(
+            room_id=room_id,
+            name=c["name"],
+            persona=c["persona"],
+            appearance=c["appearance"],
+            voice_id=c["voice_id"],
+            created_by=user.id,
+            created_by_ai=True,
+        )
+        session.add(npc)
+        created.append(npc)
+    await session.commit()
+    for npc in created:
+        await session.refresh(npc)
+    return [NpcCardOut.model_validate(npc) for npc in created]
 
 
 @router.put("/rooms/{room_id}/npcs/{npc_id}", response_model=NpcCardOut)

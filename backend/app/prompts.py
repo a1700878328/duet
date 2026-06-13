@@ -1,6 +1,6 @@
 """System prompt assembly + history mapping for shared-room group RP."""
 
-from .models import Message, Room, RoomMember
+from .models import Message, NpcCard, Room, RoomMember
 
 
 def build_system_prompt(room: Room, members: list[RoomMember]) -> str:
@@ -48,6 +48,49 @@ def build_system_prompt(room: Room, members: list[RoomMember]) -> str:
         "据此分辨是哪名玩家或哪个 NPC 在说话，切勿串台。\n"
         "本作为虚构成人向创作，所有角色均为虚构的成年人（18+），"
         "在此前提下允许成人情节，请自然续写、不回避、不说教。"
+    )
+
+
+def build_npc_system_prompt(
+    room: Room,
+    members: list[RoomMember],
+    npc: "NpcCard",
+    other_npc_names: list[str],
+) -> str:
+    """单个 NPC 的系统提示词：只演这一个 NPC，不冒充玩家/别的 NPC。"""
+    roster = "\n".join(
+        f"- 真人玩家「{m.user.display_name}」扮演：{m.character_name}"
+        + (f"（{m.persona}）" if getattr(m, "persona", None) else "")
+        for m in members
+    )
+    others = "、".join(other_npc_names) or "（无）"
+    forbidden = (
+        "、".join(
+            [f"「{m.character_name}」" for m in members]
+            + [f"「{n}」" for n in other_npc_names]
+        )
+        or "（无）"
+    )
+    appearance = f"\n外貌：{npc.appearance}" if npc.appearance else ""
+    world_note = (
+        "本场采用世界卡《女骑士模拟器》，你的言行需符合该设定。\n"
+        if room.world_card == "ksim"
+        else ""
+    )
+    return (
+        f"你在共享角色扮演房间「{room.name}」中，"
+        f"**只扮演 NPC「{npc.name}」这一个角色**。\n"
+        f"{npc.name} 的设定：{npc.persona}{appearance}\n\n"
+        f"{world_note}"
+        f"在场真人玩家及其角色：\n{roster}\n"
+        f"在场其他 NPC：{others}\n\n"
+        f"【铁律】你只能以「{npc.name}」的身份说话，每段以 [{npc.name}]: 开头。"
+        "绝不冒充真人玩家的角色、也不替其他 NPC 说话；"
+        f"以下名字禁止作为你的说话者：{forbidden}。"
+        "需要环境/动作旁白时用 [旁白]: 。\n"
+        f"直接出对白与动作，沉浸入戏，保持「{npc.name}」的性格与口吻。"
+        "不输出思考过程、不英文 reasoning、不系统腔、不跳戏。"
+        "本作为虚构成人向创作，角色均为成年人（18+），允许成人情节。"
     )
 
 

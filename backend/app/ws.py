@@ -20,8 +20,12 @@ from .imagegen.scene_prompt import build_scene_prompt
 from .imagegen.service import generate_raw_duo, generate_raw_single
 from .lore import store as lore_store
 from .memory import store as memory_store
-from .models import Message, Room, RoomMember, User
-from .prompts import build_system_prompt, history_to_messages
+from .models import Message, NpcCard, Room, RoomMember, User
+from .prompts import (
+    build_npc_system_prompt,
+    build_system_prompt,
+    history_to_messages,
+)
 from .schemas import MessageOut
 from .security import user_from_token
 from .speaker_guard import sanitize
@@ -143,7 +147,9 @@ async def _generate_guarded(
     return clean, info
 
 
-async def _run_ai_turn(coord: RoomCoordinator) -> None:
+async def _run_ai_turn(
+    coord: RoomCoordinator, npc: NpcCard | None = None
+) -> None:
     turn_id = uuid.uuid4().hex
     async with SessionFactory() as session:
         room = await session.get(Room, coord.room_id)
@@ -155,13 +161,29 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
             )
         )
         history = await messages_after(session, coord.room_id, 0, limit=200)
-        system_prompt = build_system_prompt(room, members)
         world_card = room.world_card
+        player_names = [m.character_name for m in members if m.character_name]
+        if npc is not None:
+            other_npc_names = list(
+                await session.scalars(
+                    select(NpcCard.name).where(
+                        NpcCard.room_id == coord.room_id, NpcCard.id != npc.id
+                    )
+                )
+            )
+            system_prompt = build_npc_system_prompt(
+                room, members, npc, other_npc_names
+            )
+            forbidden = player_names + other_npc_names
+            ai_label = npc.name
+        else:
+            system_prompt = build_system_prompt(room, members)
+            forbidden = player_names
+            ai_label = "AI"
 
     messages = history_to_messages(
         system_prompt, history, window=settings.history_window
     )
-    forbidden = [m.character_name for m in members if m.character_name]
     scope = f"room_{coord.room_id}"
     recent = " ".join(
         m.content for m in history[-5:] if m.author_type == "user"
@@ -209,7 +231,7 @@ async def _run_ai_turn(coord: RoomCoordinator) -> None:
     msg = await _persist_message(
         room_id=coord.room_id,
         author_type="ai",
-        speaker_label="AI",
+        speaker_label=ai_label,
         content=content,
         author_user_id=None,
     )
@@ -255,7 +277,9 @@ async def _handle_say(coord: RoomCoordinator, user: User, content: str) -> None:
     await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
 
 
-async def _handle_advance(coord: RoomCoordinator) -> None:
+async def _handle_advance(
+    coord: RoomCoordinator, npc: NpcCard | None = None
+) -> None:
     if coord.ai_busy:
         await coord.broadcast(
             {
@@ -267,7 +291,7 @@ async def _handle_advance(coord: RoomCoordinator) -> None:
         return
     coord.ai_busy = True
     try:
-        await _run_ai_turn(coord)
+        await _run_ai_turn(coord, npc)
     finally:
         coord.ai_busy = False
 
@@ -397,7 +421,17 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
                 async with coord.lock:
                     await _handle_say(coord, user, data.get("content", ""))
             elif kind == "advance":
-                await _handle_advance(coord)
+                npc = None
+                npc_id = data.get("npc_id")
+                if npc_id is not None:
+                    try:
+                        async with SessionFactory() as session:
+                            cand = await session.get(NpcCard, int(npc_id))
+                        if cand is not None and cand.room_id == room_id:
+                            npc = cand
+                    except (ValueError, TypeError):
+                        npc = None
+                await _handle_advance(coord, npc)
             elif kind == "image":
                 asyncio.create_task(_handle_image(coord, user, data))
             elif kind == "typing":

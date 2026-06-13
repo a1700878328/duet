@@ -77,6 +77,11 @@ class NpcCardIn(BaseModel):
     voice_id: str | None = Field(default=None, max_length=64)
 
 
+class NpcGenIn(BaseModel):
+    count: int = Field(default=4, ge=1, le=6)
+    hint: str | None = Field(default=None, max_length=500)
+
+
 class NpcCardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
