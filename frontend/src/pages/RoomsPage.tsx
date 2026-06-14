@@ -15,6 +15,7 @@ export function RoomsPage() {
   const [newWorld, setNewWorld] = useState("");
   const [joinId, setJoinId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +50,25 @@ export function RoomsPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "创建失败");
       setBusy(false);
+    }
+  }
+
+  async function deleteRoom(room: Room) {
+    if (
+      !window.confirm(
+        `删除房间「${room.name}」？房间内所有对话、角色、NPC 都会一并清空，无法恢复。`,
+      )
+    )
+      return;
+    setDeletingId(String(room.id));
+    setError(null);
+    try {
+      await api.deleteRoom(String(room.id));
+      setRooms((prev) => prev.filter((r) => String(r.id) !== String(room.id)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "删除失败");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -130,27 +150,49 @@ export function RoomsPage() {
         <div className="empty">还没有房间，创建一个开始吧。</div>
       ) : (
         <div className="room-list">
-          {rooms.map((room) => (
-            <button
-              key={room.id}
-              className="room-card"
-              onClick={() => navigate(`/rooms/${room.id}`)}
-            >
-              <div className="room-name">{room.name}</div>
-              <div className="room-meta">
-                {room.members.map((m) => (
-                  <span key={m.user_id} className="chip">
-                    <span className="chip-char">{m.character_name}</span>
-                    <span>· {m.display_name}</span>
-                  </span>
-                ))}
-                <span className="chip ai">NPC · AI</span>
-                {room.world_card === "ksim" && (
-                  <span className="chip">🗺 女骑士模拟器</span>
+          {rooms.map((room) => {
+            const isOwner = String(room.owner_id) === String(user?.id);
+            return (
+              <div
+                key={room.id}
+                className="room-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/rooms/${room.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") navigate(`/rooms/${room.id}`);
+                }}
+              >
+                {isOwner && (
+                  <button
+                    className="room-delete"
+                    title="删除房间（仅房主）"
+                    aria-label="删除房间"
+                    disabled={deletingId === String(room.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void deleteRoom(room);
+                    }}
+                  >
+                    {deletingId === String(room.id) ? "…" : "🗑"}
+                  </button>
                 )}
+                <div className="room-name">{room.name}</div>
+                <div className="room-meta">
+                  {room.members.map((m) => (
+                    <span key={m.user_id} className="chip">
+                      <span className="chip-char">{m.character_name}</span>
+                      <span>· {m.display_name}</span>
+                    </span>
+                  ))}
+                  <span className="chip ai">NPC · AI</span>
+                  {room.world_card === "ksim" && (
+                    <span className="chip">🗺 女骑士模拟器</span>
+                  )}
+                </div>
               </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

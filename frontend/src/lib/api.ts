@@ -149,6 +149,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  deleteRoom: (id: string) =>
+    request<void>(`/rooms/${id}`, { method: "DELETE" }),
+
   messages: (id: string, afterSeq = 0) =>
     request<Message[]>(`/rooms/${id}/messages?after_seq=${afterSeq}`),
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from .crud import is_member, messages_after, room_to_out
 from .db import get_session
 from .imagegen.anima import char_seed
 from .imagegen.portrait import generate_portrait
-from .models import NpcCard, Room, RoomMember, User
+from .models import Message, NpcCard, Room, RoomMember, User
 from .npc_gen import generate_npcs
 from .schemas import (
     AuthOut,
@@ -179,7 +179,30 @@ async def join_room(
     return await room_to_out(session, room)
 
 
-@router.get("/rooms/{room_id}/messages", response_model=list[MessageOut])
+@router.delete("/rooms/{room_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_room(
+    room_id: int, user: CurrentUser, session: SessionDep
+) -> None:
+    """删除房间（仅房主）+ 连带清掉成员/消息/NPC 卡。
+
+    用标量查 owner + Core delete（不加载 members 关系），避开"清空复合主键"的
+    级联冲突。
+    """
+    owner_id = await session.scalar(
+        select(Room.owner_id).where(Room.id == room_id)
+    )
+    if owner_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
+        )
+    if owner_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="只有房主能删除房间"
+        )
+    for model in (Message, NpcCard, RoomMember):
+        await session.execute(delete(model).where(model.room_id == room_id))
+    await session.execute(delete(Room).where(Room.id == room_id))
+    await session.commit()
 async def get_messages(
     room_id: int,
     user: CurrentUser,
