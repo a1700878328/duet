@@ -41,6 +41,7 @@ from typing import Any
 
 import httpx
 
+from .client import ensure_comfyui
 from .config import COMFY_URL
 
 Graph = dict[str, dict[str, Any]]
@@ -211,6 +212,11 @@ async def _submit_and_fetch(
     (the Anima path takes free-form prompts). Returns {bytes,filename,prompt_id}
     or {error}. Never raises.
     """
+    # ComfyUI 偶尔崩 → 先经 manager 自动拉起，自愈。
+    try:
+        await ensure_comfyui()
+    except Exception:
+        pass
     client_id = f"duet-anima-{int(time.time())}"
     async with httpx.AsyncClient() as client:
         try:
