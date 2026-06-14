@@ -49,12 +49,20 @@ async def direct_beat(
         else "通常 time_jump 为 null；只有剧情到了合适的停顿/过渡点才推进时间。"
     )
     system = (
-        "你是角色扮演**导演**。根据当前场面，决定这一拍由哪些 NPC 反应、按什么顺序，"
-        "以及是否推进剧情时间。**只输出 JSON**，不要多余文字：\n"
-        '{"acts": [按发言顺序的 NPC id 数组，0 到 3 个，只选此刻最该反应的；'
-        '安静场合可为空], "time_jump": null 或 '
-        '"一句话：时间流逝 + 这段时间世界/相关 NPC 做了什么/局势变化"}\n'
-        "不要让所有 NPC 都说话；贴合当前对话选最相关的。"
+        "你是角色扮演**导演**。根据当前场面，决定：这一拍由哪些现有 NPC 反应、"
+        "是否引入新 NPC 登场、是否推进剧情时间。**只输出 JSON**，不要多余文字：\n"
+        '{"acts": [按发言顺序的现有 NPC id 数组，0-3 个，只选此刻最该'
+        '反应的；可空], '
+        '"introduce": [{"name":"中文名","persona":"一句话身份+性格+说话风格",'
+        '"appearance":"英文Danbooru外貌",'
+        '"voice_id":"中文声音描述(性别+年龄+音色+语气)"}], '
+        '"time_jump": null 或 '
+        '"一句话:时间流逝+这段时间世界/相关NPC做了什么/局势变化"}\n'
+        "原则：不要让所有 NPC 都说话，贴合当前对话选最相关的。"
+        "introduce：剧情需要新角色出场时给（0-2 个；"
+        "在场已有合适 NPC 或无需新人则空数组）；"
+        "**若当前在场 NPC 为空且场景里该有人，就用 introduce 引入**。"
+        "多数平稳推进时 introduce 为空、time_jump 为 null。"
     )
     user = (
         f"世界：{world}\n真人玩家角色：{players}\n在场 NPC：\n{roster}\n\n"
@@ -72,4 +80,21 @@ async def direct_beat(
     ][:3]
     tj = data.get("time_jump")
     time_jump = tj.strip() if isinstance(tj, str) and tj.strip() else None
-    return {"acts": acts, "time_jump": time_jump}
+
+    introduce: list[dict[str, Any]] = []
+    for d in (data.get("introduce") or [])[:2]:
+        if isinstance(d, dict) and d.get("name"):
+            introduce.append(
+                {
+                    "name": str(d["name"])[:128],
+                    "persona": str(d.get("persona", ""))[:4000],
+                    "appearance": str(d["appearance"])[:512]
+                    if d.get("appearance")
+                    else None,
+                    "voice_id": str(d["voice_id"])[:200]
+                    if d.get("voice_id")
+                    else None,
+                }
+            )
+
+    return {"acts": acts, "introduce": introduce, "time_jump": time_jump}

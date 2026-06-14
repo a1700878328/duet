@@ -12,6 +12,7 @@ interface UseRoomSocketOptions {
   roomId: string;
   token: string;
   onError?: (code: string, detail: string) => void;
+  onCardsChanged?: () => void;
 }
 
 interface UseRoomSocketResult {
@@ -39,6 +40,7 @@ export function useRoomSocket({
   roomId,
   token,
   onError,
+  onCardsChanged,
 }: UseRoomSocketOptions): UseRoomSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -54,6 +56,8 @@ export function useRoomSocket({
   const closedByUserRef = useRef(false);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onCardsChangedRef = useRef(onCardsChanged);
+  onCardsChangedRef.current = onCardsChanged;
 
   // Merge messages keeping seq order and de-duping by seq.
   const mergeMessages = useCallback((incoming: Message[]) => {
@@ -89,6 +93,9 @@ export function useRoomSocket({
           break;
         case "image_pending":
           setImaging(true);
+          break;
+        case "cards_changed":
+          onCardsChangedRef.current?.();
           break;
         case "ai_delta":
           setAiBusy(true);

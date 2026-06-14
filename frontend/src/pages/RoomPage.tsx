@@ -75,7 +75,12 @@ export function RoomPage() {
     timeskip,
     requestImage,
     setTyping,
-  } = useRoomSocket({ roomId, token: token ?? "", onError: handleWsError });
+  } = useRoomSocket({
+    roomId,
+    token: token ?? "",
+    onError: handleWsError,
+    onCardsChanged: refreshCards,
+  });
 
   // Load room metadata for header.
   useEffect(() => {

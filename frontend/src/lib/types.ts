@@ -117,6 +117,10 @@ export interface WsImagePending {
   display_name: string;
 }
 
+export interface WsCardsChanged {
+  type: "cards_changed";
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
@@ -124,6 +128,7 @@ export type WsServerEvent =
   | WsAiDone
   | WsPresence
   | WsImagePending
+  | WsCardsChanged
   | WsError;
 
 export type WsClientEvent =

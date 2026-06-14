@@ -328,10 +328,6 @@ async def _handle_director_beat(
             history = await messages_after(session, coord.room_id, 0, limit=200)
             world_card = room.world_card
 
-        if not npcs:
-            await _run_ai_turn(coord, None)
-            return
-
         recent = "\n".join(
             f"{m.speaker_label}: {m.content}"
             for m in history[-8:]
@@ -340,6 +336,25 @@ async def _handle_director_beat(
         plan = await direct_beat(
             world_card, members, npcs, recent, force_timeskip=force_timeskip
         )
+
+        # 动态登场：导演引入的新 NPC 落库 + 通知前端刷新角色卡。
+        introduced: list[NpcCard] = []
+        for draft in plan.get("introduce", []):
+            async with SessionFactory() as session:
+                new_npc = NpcCard(
+                    room_id=coord.room_id,
+                    name=draft["name"],
+                    persona=draft.get("persona", ""),
+                    appearance=draft.get("appearance"),
+                    voice_id=draft.get("voice_id"),
+                    created_by_ai=True,
+                )
+                session.add(new_npc)
+                await session.commit()
+                await session.refresh(new_npc)
+            introduced.append(new_npc)
+        if introduced:
+            await coord.broadcast({"type": "cards_changed"})
 
         if plan.get("time_jump"):
             summary = plan["time_jump"]
@@ -361,8 +376,12 @@ async def _handle_director_beat(
             )
 
         by_id = {n.id: n for n in npcs}
+        for n in introduced:
+            by_id[n.id] = n
+        # 现有 NPC 反应 + 新登场 NPC 自报登场
+        act_ids = list(plan.get("acts", [])) + [n.id for n in introduced]
         acted = False
-        for npc_id in plan.get("acts", []):
+        for npc_id in act_ids:
             npc = by_id.get(npc_id)
             if npc is not None:
                 await _run_ai_turn(coord, npc)
