@@ -19,6 +19,30 @@ export interface RoomMember {
   avatar_url?: string | null;
 }
 
+// A 《女骑士模拟器》-style stat sheet. Mostly numeric stats (经验/开发/淫乱向),
+// plus a few string fields (职业/冒险者等级), a 状态 tag list, and a 好感度 map.
+// Loose by design: the AI judge may emit new keys, so we keep an index signature.
+export type StatValue = number | string | string[] | Record<string, number>;
+
+export interface CharStats {
+  // 基础
+  职业?: string;
+  冒险者等级?: string;
+  等级?: number;
+  经验?: number;
+  力量?: number;
+  敏捷?: number;
+  智力?: number;
+  意志?: number;
+  金钱?: number;
+  支出?: number;
+  // 状态 / 关系
+  状态?: string[];
+  好感度?: Record<string, number>;
+  // 经验·开发 与未知字段
+  [key: string]: StatValue | undefined;
+}
+
 // A character card for a member (player). Returned by GET /rooms/{id}/cards.
 export interface MemberCard {
   user_id: number;
@@ -28,6 +52,7 @@ export interface MemberCard {
   persona: string | null;
   voice_id: string | null;
   avatar_url?: string | null;
+  stats?: CharStats | null;
 }
 
 // An NPC card living in a room (AI- or hand-authored).
@@ -130,6 +155,15 @@ export interface WsCardsChanged {
   type: "cards_changed";
 }
 
+// Broadcast after a beat for the player who acted: the full refreshed sheet
+// plus the just-applied delta (e.g. {"口腔经验":5,"淫乱":1,"状态_add":["监禁:哥布林"]}).
+export interface WsStats {
+  type: "stats";
+  user_id: number;
+  stats: CharStats;
+  delta: Record<string, StatValue>;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
@@ -138,6 +172,7 @@ export type WsServerEvent =
   | WsPresence
   | WsImagePending
   | WsCardsChanged
+  | WsStats
   | WsError;
 
 export type WsClientEvent =

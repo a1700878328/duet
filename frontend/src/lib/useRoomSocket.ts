@@ -1,18 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, roomSocketUrl } from "./api";
 import type {
+  CharStats,
   ConnectionStatus,
   Message,
+  StatValue,
   StreamingTurn,
   WsClientEvent,
   WsServerEvent,
 } from "./types";
+
+export interface StatsEvent {
+  user_id: number;
+  stats: CharStats;
+  delta: Record<string, StatValue>;
+}
 
 interface UseRoomSocketOptions {
   roomId: string;
   token: string;
   onError?: (code: string, detail: string) => void;
   onCardsChanged?: () => void;
+  onStats?: (ev: StatsEvent) => void;
 }
 
 interface UseRoomSocketResult {
@@ -41,6 +50,7 @@ export function useRoomSocket({
   token,
   onError,
   onCardsChanged,
+  onStats,
 }: UseRoomSocketOptions): UseRoomSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -58,6 +68,8 @@ export function useRoomSocket({
   onErrorRef.current = onError;
   const onCardsChangedRef = useRef(onCardsChanged);
   onCardsChangedRef.current = onCardsChanged;
+  const onStatsRef = useRef(onStats);
+  onStatsRef.current = onStats;
 
   // Merge messages keeping seq order and de-duping by seq.
   const mergeMessages = useCallback((incoming: Message[]) => {
@@ -96,6 +108,13 @@ export function useRoomSocket({
           break;
         case "cards_changed":
           onCardsChangedRef.current?.();
+          break;
+        case "stats":
+          onStatsRef.current?.({
+            user_id: event.user_id,
+            stats: event.stats,
+            delta: event.delta,
+          });
           break;
         case "ai_delta":
           setAiBusy(true);

@@ -1128,3 +1128,133 @@ textarea {
 .char-select-describe .input {
   flex: 1 1 240px;
 }
+
+/* ---------- stats panel (女骑士模拟器式数值表) ---------- */
+
+.stats-body {
+  gap: 18px;
+}
+
+.stat-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stat-group-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Dense two-column label/value rows; collapses to one column on narrow screens. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid transparent;
+  font-size: 13px;
+  min-width: 0;
+}
+.stat-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  flex: 0 0 auto;
+}
+/* Non-zero 淫乱向数值 highlighted; zeros dimmed for scan-ability. */
+.stat-row.hot {
+  border-color: var(--ai-border);
+  background: var(--ai-soft);
+}
+.stat-row.hot .stat-value {
+  color: var(--ai);
+}
+.stat-row.zero {
+  opacity: 0.55;
+}
+.stat-row.zero .stat-value {
+  color: var(--text-faint);
+}
+
+.stat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.stat-tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 93, 108, 0.14);
+  color: var(--danger);
+  border: 1px solid rgba(255, 93, 108, 0.4);
+}
+.stat-empty {
+  font-size: 13px;
+}
+
+/* Floating "增量" flash after a beat — bottom-center above the toast slot. */
+.delta-flash {
+  position: fixed;
+  left: 50%;
+  bottom: 140px;
+  transform: translateX(-50%);
+  max-width: min(92vw, 520px);
+  text-align: center;
+  background: linear-gradient(135deg, var(--accent-strong), var(--ai));
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow);
+  z-index: 55;
+  pointer-events: none;
+  animation: deltaflash 3.2s ease forwards;
+}
+@keyframes deltaflash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 12px) scale(0.94);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.98);
+  }
+}
+
+@media (max-width: 520px) {
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}

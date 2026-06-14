@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from typing import Any
 
 from .brain import BrainProvider, default_provider
@@ -65,6 +66,34 @@ def apply_delta(stats: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
         out["经验"] -= 100 * out["等级"]
         out["等级"] = out.get("等级", 1) + 1
     return out
+
+
+def _state_count(states: list[Any], prefix: str) -> int:
+    """从状态文本（如 '监禁:哥布林 5'）取计数；只存在无数字记 1，无则 0。"""
+    for s in states:
+        if str(s).startswith(prefix):
+            m = re.search(r"(\d+)", str(s))
+            return int(m.group(1)) if m else 1
+    return 0
+
+
+def check_ending(stats: dict[str, Any]) -> str | None:
+    """数值/状态跨阈值 → 触发结局（照《女骑士模拟器》解码条件）。无则 None。"""
+    states = stats.get("状态") or []
+    has = lambda p: any(p in str(s) for s in states)  # noqa: E731
+    lewd = int(stats.get("淫乱", 0) or 0)
+    money = int(stats.get("金钱", 0) or 0)
+    if _state_count(states, "监禁:哥布林") >= 5 or (has("监禁:哥布林") and lewd >= 40):
+        return "哥布林的母狗"
+    if _state_count(states, "监禁:兽人") >= 4 or (has("监禁:兽人") and lewd >= 50):
+        return "兽人的新娘"
+    if (has("怀孕") and lewd >= 60) or _state_count(states, "怀孕") >= 3:
+        return "魔物的母亲"
+    if has("负债") and money <= -500:
+        return "奴隶娼妇"
+    if has("公共厕所") and lewd >= 50:
+        return "肉便器的末路"
+    return None
 
 
 def _parse_obj(raw: str) -> dict[str, Any]:

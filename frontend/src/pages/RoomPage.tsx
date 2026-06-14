@@ -11,16 +11,39 @@ import { CardPanel } from "../components/CardPanel";
 import { CharacterSelect } from "../components/CharacterSelect";
 import { Composer } from "../components/Composer";
 import { MessageBubble } from "../components/MessageBubble";
+import { StatsPanel } from "../components/StatsPanel";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useRoomSocket } from "../lib/useRoomSocket";
-import type { Message, RoomCards, Room } from "../lib/types";
+import { useRoomSocket, type StatsEvent } from "../lib/useRoomSocket";
+import type { CharStats, Message, RoomCards, Room, StatValue } from "../lib/types";
 
 const NEAR_BOTTOM_PX = 80;
 
 // Strip a leading "[name]:" or "name：" speaker prefix before TTS synthesis.
 function stripSpeakerPrefix(text: string): string {
   return text.replace(/^\s*[[【]?[^\]\n：:]{1,24}[\]】]?\s*[：:]\s*/, "").trim();
+}
+
+// Render a stat delta into a short flash string, e.g. "口腔经验+5 淫乱+1 金钱-100 ⛓监禁:哥布林".
+function formatDelta(delta: Record<string, StatValue>): string {
+  const parts: string[] = [];
+  for (const [key, val] of Object.entries(delta)) {
+    if (key === "状态_add" && Array.isArray(val)) {
+      for (const s of val) parts.push(`⛓${s}`);
+    } else if (key === "状态_del" && Array.isArray(val)) {
+      for (const s of val) parts.push(`✓解除${s}`);
+    } else if (key === "好感度" && val && typeof val === "object") {
+      for (const [npc, dv] of Object.entries(val as Record<string, number>)) {
+        if (dv) parts.push(`♥${npc}${dv > 0 ? "+" : ""}${dv}`);
+      }
+    } else if (typeof val === "number") {
+      if (val === 0) continue;
+      parts.push(`${key}${val > 0 ? "+" : ""}${val}`);
+    } else if (typeof val === "string") {
+      parts.push(`${key}:${val}`);
+    }
+  }
+  return parts.join(" ");
 }
 
 export function RoomPage() {
@@ -34,8 +57,15 @@ export function RoomPage() {
   const [autoMode, setAutoMode] = useState(false);
   const [nsfw, setNsfw] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
   const [charSelectDismissed, setCharSelectDismissed] = useState(false);
+
+  // My live stat sheet — seeded from my card, updated by "stats" WS events.
+  const [myStats, setMyStats] = useState<CharStats | null>(null);
+  // Brief floating "增量" flash after a beat (cleared on a timer).
+  const [deltaFlash, setDeltaFlash] = useState<string | null>(null);
+  const deltaTimer = useRef<number | null>(null);
 
   // Lifted cards state — shared by bubbles (avatar resolver) and the panel.
   const [cards, setCards] = useState<RoomCards | null>(null);
@@ -66,6 +96,20 @@ export function RoomPage() {
     [showToast],
   );
 
+  // A "stats" event for ME: refresh my sheet + flash the just-applied delta.
+  const handleStats = useCallback(
+    (ev: StatsEvent) => {
+      if (String(ev.user_id) !== String(user?.id)) return;
+      setMyStats(ev.stats);
+      const text = formatDelta(ev.delta);
+      if (!text) return;
+      setDeltaFlash(text);
+      if (deltaTimer.current) window.clearTimeout(deltaTimer.current);
+      deltaTimer.current = window.setTimeout(() => setDeltaFlash(null), 3200);
+    },
+    [user?.id],
+  );
+
   const {
     status,
     messages,
@@ -83,6 +127,7 @@ export function RoomPage() {
     token: token ?? "",
     onError: handleWsError,
     onCardsChanged: refreshCards,
+    onStats: handleStats,
   });
 
   // Load room metadata for header.
@@ -134,6 +179,19 @@ export function RoomPage() {
       null,
     [cards, user?.id],
   );
+  // Seed my stat sheet from the lifted card. WS "stats" events take over after
+  // the first beat; only seed when we don't already hold live stats.
+  useEffect(() => {
+    if (myCard?.stats) setMyStats((prev) => prev ?? myCard.stats ?? null);
+  }, [myCard]);
+
+  useEffect(
+    () => () => {
+      if (deltaTimer.current) window.clearTimeout(deltaTimer.current);
+    },
+    [],
+  );
+
   // Force in-room character selection when cards have loaded and my card has
   // no persona set yet. Dismissible; never blocks the room if skipped.
   const needsCharSelect =
@@ -327,6 +385,14 @@ export function RoomPage() {
           >
             🎭 角色
           </button>
+          <button
+            className={`btn btn-ghost cards-toggle ${statsOpen ? "active" : ""}`}
+            onClick={() => setStatsOpen((v) => !v)}
+            aria-pressed={statsOpen}
+            title="我的角色状态（女骑士模拟器式数值表）"
+          >
+            📊 状态
+          </button>
         </div>
 
         <div className="room-header-top">
@@ -477,8 +543,21 @@ export function RoomPage() {
         }}
       />
 
+      <StatsPanel
+        open={statsOpen}
+        onClose={() => setStatsOpen(false)}
+        stats={myStats}
+        characterName={myCard?.character_name}
+      />
+
       {needsCharSelect && (
         <CharacterSelect roomId={roomId} onDone={dismissCharSelect} />
+      )}
+
+      {deltaFlash && (
+        <div className="delta-flash" role="status">
+          {deltaFlash}
+        </div>
       )}
 
       {toast && <div className="toast">{toast}</div>}

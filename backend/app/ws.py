@@ -31,7 +31,12 @@ from .prompts import (
 from .schemas import MessageOut
 from .security import user_from_token
 from .speaker_guard import sanitize
-from .stats import apply_delta, default_stats, judge_stat_delta
+from .stats import (
+    apply_delta,
+    check_ending,
+    default_stats,
+    judge_stat_delta,
+)
 
 router = APIRouter()
 
@@ -299,6 +304,34 @@ async def _handle_advance(
         coord.ai_busy = False
 
 
+def _player_state_summary(members: list[RoomMember]) -> str:
+    """给导演的玩家数值/状态摘要（驱动剧情倾向）。"""
+    parts: list[str] = []
+    for m in members:
+        if not m.stats:
+            continue
+        try:
+            st = json.loads(m.stats)
+        except Exception:
+            continue
+        bits: list[str] = []
+        for k in ("金钱", "淫乱", "欲望", "露出经验", "受虐经验"):
+            v = st.get(k)
+            if isinstance(v, (int, float)) and v:
+                bits.append(f"{k}{v}")
+        states = st.get("状态") or []
+        if states:
+            bits.append("状态[" + "、".join(str(s) for s in states) + "]")
+        aff = st.get("好感度") or {}
+        if aff:
+            bits.append(
+                "好感度{" + "、".join(f"{n}:{v}" for n, v in aff.items()) + "}"
+            )
+        if bits:
+            parts.append(f"{m.character_name}: " + " ".join(bits))
+    return " ｜ ".join(parts)
+
+
 async def _handle_director_beat(
     coord: RoomCoordinator, *, force_timeskip: bool = False
 ) -> None:
@@ -336,7 +369,12 @@ async def _handle_director_beat(
             if m.author_type in {"user", "ai"}
         )
         plan = await direct_beat(
-            world_card, members, npcs, recent, force_timeskip=force_timeskip
+            world_card,
+            members,
+            npcs,
+            recent,
+            force_timeskip=force_timeskip,
+            player_state=_player_state_summary(members),
         )
 
         # 动态登场：导演引入的新 NPC 落库 + 通知前端刷新角色卡。
@@ -537,6 +575,40 @@ async def _judge_and_apply_stats(coord: RoomCoordinator, user_id: int) -> None:
     await coord.broadcast(
         {"type": "stats", "user_id": user_id, "stats": new_stats, "delta": delta}
     )
+
+    # 结局触发：数值/状态跨阈值 → 旁白叙述终局 + ending 事件。
+    ending = check_ending(new_stats)
+    if ending:
+        try:
+            narr = (
+                await default_provider().complete(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是《女骑士模拟器》的结局叙述者。给定结局名，"
+                                "用 2-4 句沉浸描写主角走向这个结局的终局画面，"
+                                "第二人称、黑暗露骨、不跳戏。"
+                            ),
+                        },
+                        {"role": "user", "content": f"结局：{ending}"},
+                    ]
+                )
+            ).strip()
+        except Exception:  # noqa: BLE001
+            narr = ""
+        text = f"【结局：{ending}】\n{narr}" if narr else f"【结局：{ending}】"
+        msg = await _persist_message(
+            room_id=coord.room_id,
+            author_type="ai",
+            speaker_label="旁白",
+            content=text,
+            author_user_id=None,
+        )
+        await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+        await coord.broadcast(
+            {"type": "ending", "name": ending, "user_id": user_id}
+        )
 
 
 @router.websocket("/ws/rooms/{room_id}")

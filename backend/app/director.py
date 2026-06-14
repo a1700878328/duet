@@ -31,6 +31,7 @@ async def direct_beat(
     recent_scene: str,
     *,
     force_timeskip: bool = False,
+    player_state: str = "",
     brain: BrainProvider | None = None,
 ) -> dict[str, Any]:
     """返回 {"acts": [npc_id...], "time_jump": str|None}。
@@ -62,10 +63,18 @@ async def direct_beat(
         "introduce：剧情需要新角色出场时给（0-2 个；"
         "在场已有合适 NPC 或无需新人则空数组）；"
         "**若当前在场 NPC 为空且场景里该有人，就用 introduce 引入**。"
-        "多数平稳推进时 introduce 为空、time_jump 为 null。"
+        "多数平稳推进时 introduce 为空、time_jump 为 null。\n"
+        "【数值→剧情倾向，仿《女骑士模拟器》】结合下面玩家数值/状态，"
+        "把剧情往合适方向推（选 acts/introduce/time_jump 时体现）："
+        "负债/没钱→倾向引入借贷商/流落街头/卖春事件，钱越负越强；"
+        "淫乱高→倾向被调教/堕落剧情，露出高→露出事件，欲望高→发情/自慰；"
+        "状态'监禁:X'→强制推进该怪物的囚禁侵犯循环，直到逃脱或彻底沦陷；"
+        "'怀孕:X'/'公共厕所'/'契约:娼妇'→推进对应堕落剧情；"
+        "好感度高的 NPC 可深入互动。让世界对玩家处境做出游戏式反应。"
     )
+    state_block = f"\n玩家数值/状态：{player_state}" if player_state else ""
     user = (
-        f"世界：{world}\n真人玩家角色：{players}\n在场 NPC：\n{roster}\n\n"
+        f"世界：{world}\n真人玩家角色：{players}\n在场 NPC：\n{roster}{state_block}\n\n"
         f"最近场面：\n{recent_scene or '（刚开场）'}\n\n{skip_note}"
     )
     raw = await brain.complete(
