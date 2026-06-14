@@ -36,6 +36,7 @@ from .stats import (
     check_ending,
     default_stats,
     judge_stat_delta,
+    monthend_settle,
 )
 
 router = APIRouter()
@@ -332,6 +333,52 @@ def _player_state_summary(members: list[RoomMember]) -> str:
     return " ｜ ".join(parts)
 
 
+async def _advance_week(coord: RoomCoordinator) -> None:
+    """推进叙事时间一周；每满 4 周月末结算（扣食宿→可能负债）并广播。"""
+    settlements: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+    async with SessionFactory() as session:
+        room = await session.get(Room, coord.room_id)
+        if room is None:
+            return
+        new_week = (room.week or 1) + 1
+        room.week = new_week
+        if new_week % 4 == 0:  # 每满 4 周 = 月末
+            members = list(
+                await session.scalars(
+                    select(RoomMember).where(RoomMember.room_id == coord.room_id)
+                )
+            )
+            for m in members:
+                cur = json.loads(m.stats) if m.stats else default_stats()
+                new_stats, delta = monthend_settle(cur)
+                m.stats = json.dumps(new_stats, ensure_ascii=False)
+                settlements.append((m.user_id, new_stats, delta))
+        await session.commit()
+
+    await coord.broadcast({"type": "week", "week": new_week})
+    if settlements:
+        msg = await _persist_message(
+            room_id=coord.room_id,
+            author_type="ai",
+            speaker_label="旁白",
+            content=(
+                f"💰 第{new_week}周·月末结算：食宿开销已扣，"
+                "囊中渐空者需早作打算。"
+            ),
+            author_user_id=None,
+        )
+        await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+        for uid, new_stats, delta in settlements:
+            await coord.broadcast(
+                {
+                    "type": "stats",
+                    "user_id": uid,
+                    "stats": new_stats,
+                    "delta": delta,
+                }
+            )
+
+
 async def _handle_director_beat(
     coord: RoomCoordinator, *, force_timeskip: bool = False
 ) -> None:
@@ -414,6 +461,10 @@ async def _handle_director_beat(
                     summary,
                 )
             )
+
+        # 叙事时间推进：强制 timeskip 或导演主动跳时，都推进一周（含月末结算）。
+        if force_timeskip or plan.get("time_jump"):
+            await _advance_week(coord)
 
         by_id = {n.id: n for n in npcs}
         for n in introduced:

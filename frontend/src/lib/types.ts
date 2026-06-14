@@ -89,6 +89,7 @@ export interface Room {
   owner_id: string;
   ai_mode: AiMode;
   world_card?: string | null;
+  week?: number;
   members: RoomMember[];
 }
 
@@ -164,6 +165,12 @@ export interface WsStats {
   delta: Record<string, StatValue>;
 }
 
+// 叙事时间推进到第 N 周（timeskip 或导演跳时；每满 4 周月末结算）。
+export interface WsWeek {
+  type: "week";
+  week: number;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
@@ -173,6 +180,7 @@ export type WsServerEvent =
   | WsImagePending
   | WsCardsChanged
   | WsStats
+  | WsWeek
   | WsError;
 
 export type WsClientEvent =

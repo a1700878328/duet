@@ -51,6 +51,7 @@ class RoomOut(BaseModel):
     owner_id: int
     ai_mode: str
     world_card: str | None = None
+    week: int = 1
     members: list[MemberOut]
 
 

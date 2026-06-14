@@ -360,6 +360,16 @@ textarea {
   font-size: 12px;
   color: var(--text-dim);
 }
+.week-chip {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
 .status .dot.open {
   background: var(--online);
   box-shadow: 0 0 8px var(--online);

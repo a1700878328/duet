@@ -43,6 +43,8 @@ class Room(Base):
     world_card: Mapped[str | None] = mapped_column(
         String(32), nullable=True, default=None
     )
+    # 叙事时间：第 N 周（非真实时间）；timeskip 推进，每满 4 周月末结算。
+    week: Mapped[int] = mapped_column(default=1)
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     members: Mapped[list["RoomMember"]] = relationship(

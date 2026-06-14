@@ -58,6 +58,8 @@ export function RoomPage() {
   const [nsfw, setNsfw] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  // 叙事时间：第 N 周（room 元数据 seed，week 事件实时更新）。
+  const [week, setWeek] = useState(1);
   // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
   const [charSelectDismissed, setCharSelectDismissed] = useState(false);
 
@@ -110,6 +112,8 @@ export function RoomPage() {
     [user?.id],
   );
 
+  const handleWeek = useCallback((w: number) => setWeek(w), []);
+
   const {
     status,
     messages,
@@ -128,6 +132,7 @@ export function RoomPage() {
     onError: handleWsError,
     onCardsChanged: refreshCards,
     onStats: handleStats,
+    onWeek: handleWeek,
   });
 
   // Load room metadata for header.
@@ -140,6 +145,7 @@ export function RoomPage() {
         const found =
           rooms.find((r) => String(r.id) === String(roomId)) ?? null;
         setRoom(found);
+        if (found?.week) setWeek(found.week);
         if (!found) setLoadError("未找到房间，或你不在其中。");
       })
       .catch((err) => {
@@ -361,6 +367,9 @@ export function RoomPage() {
             ←
           </button>
           <h2>{room?.name ?? "房间"}</h2>
+          <span className="week-chip" title="叙事时间（每满 4 周月末结算）">
+            🗓 第{week}周
+          </span>
           <span className={`status`}>
             <span className={`dot ${status}`} />
             {status === "open"

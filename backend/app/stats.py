@@ -68,6 +68,22 @@ def apply_delta(stats: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+MONTHLY_RENT = 60  # 月末食宿基础支出。
+
+
+def monthend_settle(
+    stats: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """月末结算：扣食宿(+累计支出)，钱不够则负债。返回(新表, 应用的增量)。"""
+    rent = MONTHLY_RENT + int(stats.get("支出", 0) or 0)
+    delta: dict[str, Any] = {"金钱": -rent}
+    after = int(stats.get("金钱", 0) or 0) - rent
+    states = stats.get("状态") or []
+    if after < 0 and not any("负债" in str(s) for s in states):
+        delta["状态_add"] = ["负债"]
+    return apply_delta(stats, delta), delta
+
+
 def _state_count(states: list[Any], prefix: str) -> int:
     """从状态文本（如 '监禁:哥布林 5'）取计数；只存在无数字记 1，无则 0。"""
     for s in states:

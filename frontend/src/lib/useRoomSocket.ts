@@ -22,6 +22,7 @@ interface UseRoomSocketOptions {
   onError?: (code: string, detail: string) => void;
   onCardsChanged?: () => void;
   onStats?: (ev: StatsEvent) => void;
+  onWeek?: (week: number) => void;
 }
 
 interface UseRoomSocketResult {
@@ -51,6 +52,7 @@ export function useRoomSocket({
   onError,
   onCardsChanged,
   onStats,
+  onWeek,
 }: UseRoomSocketOptions): UseRoomSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -70,6 +72,8 @@ export function useRoomSocket({
   onCardsChangedRef.current = onCardsChanged;
   const onStatsRef = useRef(onStats);
   onStatsRef.current = onStats;
+  const onWeekRef = useRef(onWeek);
+  onWeekRef.current = onWeek;
 
   // Merge messages keeping seq order and de-duping by seq.
   const mergeMessages = useCallback((incoming: Message[]) => {
@@ -115,6 +119,9 @@ export function useRoomSocket({
             stats: event.stats,
             delta: event.delta,
           });
+          break;
+        case "week":
+          onWeekRef.current?.(event.week);
           break;
         case "ai_delta":
           setAiBusy(true);
