@@ -47,7 +47,7 @@ from .security import (
 )
 from .stats import default_stats
 from .voice import store as voice_store
-from .world_presets import preset_npcs
+from .world_presets import preset_npcs, start_scene
 
 router = APIRouter(prefix="/api")
 
@@ -122,6 +122,7 @@ async def create_room(
         owner_id=user.id,
         ai_mode="manual",
         world_card=body.world_card,
+        current_scene=start_scene(body.world_card),
     )
     session.add(room)
     await session.flush()
@@ -142,6 +143,7 @@ async def create_room(
                 persona=p["persona"],
                 appearance=p.get("appearance"),
                 voice_id=p.get("voice_id"),
+                scene=p.get("scene"),
                 created_by_ai=True,
             )
         )

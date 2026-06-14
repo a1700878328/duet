@@ -23,6 +23,7 @@ interface UseRoomSocketOptions {
   onCardsChanged?: () => void;
   onStats?: (ev: StatsEvent) => void;
   onWeek?: (week: number) => void;
+  onScene?: (scene: string) => void;
 }
 
 interface UseRoomSocketResult {
@@ -36,6 +37,7 @@ interface UseRoomSocketResult {
   advance: (npcId?: number) => void;
   timeskip: () => void;
   requestImage: (nsfw: boolean) => void;
+  gotoScene: (scene: string) => void;
   setTyping: (isTyping: boolean) => void;
 }
 
@@ -53,6 +55,7 @@ export function useRoomSocket({
   onCardsChanged,
   onStats,
   onWeek,
+  onScene,
 }: UseRoomSocketOptions): UseRoomSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -74,6 +77,8 @@ export function useRoomSocket({
   onStatsRef.current = onStats;
   const onWeekRef = useRef(onWeek);
   onWeekRef.current = onWeek;
+  const onSceneRef = useRef(onScene);
+  onSceneRef.current = onScene;
 
   // Merge messages keeping seq order and de-duping by seq.
   const mergeMessages = useCallback((incoming: Message[]) => {
@@ -122,6 +127,9 @@ export function useRoomSocket({
           break;
         case "week":
           onWeekRef.current?.(event.week);
+          break;
+        case "scene":
+          onSceneRef.current?.(event.scene);
           break;
         case "ai_delta":
           setAiBusy(true);
@@ -265,6 +273,17 @@ export function useRoomSocket({
     [send],
   );
 
+  const gotoScene = useCallback(
+    (scene: string) => {
+      const dest = scene.trim();
+      if (dest) {
+        setAiBusy(true);
+        send({ type: "goto_scene", scene: dest });
+      }
+    },
+    [send],
+  );
+
   const setTyping = useCallback(
     (isTyping: boolean) => send({ type: "typing", is_typing: isTyping }),
     [send],
@@ -281,6 +300,7 @@ export function useRoomSocket({
     advance,
     timeskip,
     requestImage,
+    gotoScene,
     setTyping,
   };
 }

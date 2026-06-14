@@ -399,7 +399,7 @@ async def _handle_director_beat(
                     select(RoomMember).where(RoomMember.room_id == coord.room_id)
                 )
             )
-            npcs = list(
+            all_active = list(
                 await session.scalars(
                     select(NpcCard).where(
                         NpcCard.room_id == coord.room_id,
@@ -409,6 +409,15 @@ async def _handle_director_beat(
             )
             history = await messages_after(session, coord.room_id, 0, limit=200)
             world_card = room.world_card
+            current_scene = room.current_scene or ""
+
+        # 场景分区：只让当前场景（或随队 scene=None）的 NPC 参与本拍。
+        # 自由世界（current_scene==""）不分区，全员在场。
+        npcs = (
+            [n for n in all_active if not n.scene or n.scene == current_scene]
+            if current_scene
+            else all_active
+        )
 
         recent = "\n".join(
             f"{m.speaker_label}: {m.content}"
@@ -422,6 +431,7 @@ async def _handle_director_beat(
             recent,
             force_timeskip=force_timeskip,
             player_state=_player_state_summary(members),
+            scene=current_scene,
         )
 
         # 动态登场：导演引入的新 NPC 落库 + 通知前端刷新角色卡。
@@ -434,6 +444,7 @@ async def _handle_director_beat(
                     persona=draft.get("persona", ""),
                     appearance=draft.get("appearance"),
                     voice_id=draft.get("voice_id"),
+                    scene=current_scene or None,
                     created_by_ai=True,
                 )
                 session.add(new_npc)
@@ -482,6 +493,86 @@ async def _handle_director_beat(
             await _run_ai_turn(coord, None)
     finally:
         coord.ai_busy = False
+
+
+async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
+    """切换当前场景：记录离开时间→过渡/回切补叙旁白→此地 NPC 反应。"""
+    dest = (dest or "").strip()[:64]
+    if not dest:
+        return
+    if coord.ai_busy:
+        await coord.broadcast(
+            {"type": "error", "code": "ai_busy", "detail": "上一拍还没演完"}
+        )
+        return
+
+    async with SessionFactory() as session:
+        room = await session.get(Room, coord.room_id)
+        if room is None:
+            return
+        old = room.current_scene or ""
+        if dest == old:
+            return  # 已在此场景
+        meta: dict[str, Any] = (
+            json.loads(room.scenes_meta) if room.scenes_meta else {}
+        )
+        week = room.week or 1
+        if old:
+            meta[old] = week  # 记录离开 old 的周数
+        last_seen = meta.get(dest)  # dest 上次离开周数；None=首次到访
+        room.current_scene = dest
+        room.scenes_meta = json.dumps(meta, ensure_ascii=False)
+        await session.commit()
+        members = list(
+            await session.scalars(
+                select(RoomMember).where(RoomMember.room_id == coord.room_id)
+            )
+        )
+
+    party = "、".join(m.character_name for m in members) or "一行人"
+    if last_seen is None:
+        ask = f"{party}来到「{dest}」。用一句话描写初次踏入此地所见的场景气氛。"
+    else:
+        gap = max(0, week - int(last_seen))
+        ask = (
+            f"{party}时隔约 {gap} 周重回「{dest}」。用一两句话补叙：这段时间这里"
+            "发生/变化了什么，以及此刻重回所见。"
+        )
+
+    coord.ai_busy = True
+    try:
+        text = await brain.complete(
+            [
+                {
+                    "role": "system",
+                    "content": "你是角色扮演旁白。简洁、有画面感，只输出旁白文字。",
+                },
+                {"role": "user", "content": ask},
+            ]
+        )
+    finally:
+        coord.ai_busy = False
+    text = (text or "").strip() or f"{party}来到了「{dest}」。"
+
+    msg = await _persist_message(
+        room_id=coord.room_id,
+        author_type="ai",
+        speaker_label="旁白",
+        content=f"📍 {text}",
+        author_user_id=None,
+    )
+    await coord.broadcast({"type": "scene", "scene": dest})
+    await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+    asyncio.create_task(
+        asyncio.to_thread(
+            memory_store.remember,
+            f"room_{coord.room_id}",
+            "[场景转换]",
+            f"{party}前往{dest}：{text}",
+        )
+    )
+    # 让此地 NPC 对到来做出反应。
+    await _handle_director_beat(coord)
 
 
 async def _handle_image(
@@ -723,6 +814,8 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
             elif kind == "timeskip":
                 await _handle_director_beat(coord, force_timeskip=True)
                 asyncio.create_task(_judge_and_apply_stats(coord, user.id))
+            elif kind == "goto_scene":
+                await _handle_goto_scene(coord, data.get("scene", ""))
             elif kind == "image":
                 asyncio.create_task(_handle_image(coord, user, data))
             elif kind == "typing":

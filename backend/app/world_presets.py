@@ -6,9 +6,13 @@
 
 from typing import Any
 
-# 《女骑士模拟器》常驻主要 NPC。
+# 各世界卡的开场场景（建房落地点）。
+START_SCENE: dict[str, str] = {"ksim": "城镇"}
+
+# 《女骑士模拟器》常驻主要 NPC（皆在「城镇」场景）。
 KSIM_NPCS: list[dict[str, Any]] = [
     {
+        "scene": "城镇",
         "name": "公会会长",
         "persona": (
             "冒险者公会会长，中年女性，干练威严、暗藏算计。负责发布委托与"
@@ -22,6 +26,7 @@ KSIM_NPCS: list[dict[str, Any]] = [
         "voice_id": "成熟女性，三十多岁，低沉沙哑，威严带一丝玩味",
     },
     {
+        "scene": "城镇",
         "name": "酒馆老板娘",
         "persona": (
             "城镇酒馆老板娘，热情爽朗、消息灵通，是情报与流言的集散地。"
@@ -35,6 +40,7 @@ KSIM_NPCS: list[dict[str, Any]] = [
         "voice_id": "成年女性，二十多岁，明亮爽朗，市井亲切",
     },
     {
+        "scene": "城镇",
         "name": "借贷商人",
         "persona": (
             "城镇放高利贷的商人，笑面油滑、唯利是图。骑士缺钱时便凑上来递钱，"
@@ -55,3 +61,8 @@ PRESETS: dict[str, list[dict[str, Any]]] = {"ksim": KSIM_NPCS}
 def preset_npcs(world_card: str | None) -> list[dict[str, Any]]:
     """该世界卡的常驻主要 NPC 预设（建房时种入）；无预设返回空。"""
     return PRESETS.get(world_card or "", [])
+
+
+def start_scene(world_card: str | None) -> str:
+    """该世界卡的开场场景标签；无预设返回 ""（自由世界，无场景分区）。"""
+    return START_SCENE.get(world_card or "", "")

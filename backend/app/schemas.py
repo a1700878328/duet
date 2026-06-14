@@ -52,6 +52,7 @@ class RoomOut(BaseModel):
     ai_mode: str
     world_card: str | None = None
     week: int = 1
+    current_scene: str = ""
     members: list[MemberOut]
 
 
@@ -96,6 +97,7 @@ class NpcCardOut(BaseModel):
     voice_id: str | None = None
     avatar_url: str | None = None
     active: bool = True
+    scene: str | None = None
     created_by_ai: bool
 
 

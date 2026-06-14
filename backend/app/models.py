@@ -45,6 +45,12 @@ class Room(Base):
     )
     # 叙事时间：第 N 周（非真实时间）；timeskip 推进，每满 4 周月末结算。
     week: Mapped[int] = mapped_column(default=1)
+    # 当前场景标签（""=无场景分区/自由世界）。导演只调当前场景的 NPC。
+    current_scene: Mapped[str] = mapped_column(String(64), default="")
+    # 场景元数据 JSON：{场景名: 上次离开时的周数}，用于回切补叙。
+    scenes_meta: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     members: Mapped[list["RoomMember"]] = relationship(
@@ -126,6 +132,10 @@ class NpcCard(Base):
     )
     # active=False 表示该 NPC 已被关闭/退出实时模拟（director 据此过滤）。
     active: Mapped[bool] = mapped_column(default=True)
+    # 所属场景标签（None=随队/无所不在，任何场景都在场）。
+    scene: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )

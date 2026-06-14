@@ -60,6 +60,10 @@ export function RoomPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   // 叙事时间：第 N 周（room 元数据 seed，week 事件实时更新）。
   const [week, setWeek] = useState(1);
+  // 当前场景标签（""=自由世界无分区）；移动面板开关。
+  const [scene, setScene] = useState("");
+  const [sceneMoveOpen, setSceneMoveOpen] = useState(false);
+  const [sceneDraft, setSceneDraft] = useState("");
   // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
   const [charSelectDismissed, setCharSelectDismissed] = useState(false);
 
@@ -113,6 +117,10 @@ export function RoomPage() {
   );
 
   const handleWeek = useCallback((w: number) => setWeek(w), []);
+  const handleScene = useCallback((s: string) => {
+    setScene(s);
+    setSceneMoveOpen(false);
+  }, []);
 
   const {
     status,
@@ -125,6 +133,7 @@ export function RoomPage() {
     advance,
     timeskip,
     requestImage,
+    gotoScene,
     setTyping,
   } = useRoomSocket({
     roomId,
@@ -133,6 +142,7 @@ export function RoomPage() {
     onCardsChanged: refreshCards,
     onStats: handleStats,
     onWeek: handleWeek,
+    onScene: handleScene,
   });
 
   // Load room metadata for header.
@@ -146,6 +156,7 @@ export function RoomPage() {
           rooms.find((r) => String(r.id) === String(roomId)) ?? null;
         setRoom(found);
         if (found?.week) setWeek(found.week);
+        if (found?.current_scene) setScene(found.current_scene);
         if (!found) setLoadError("未找到房间，或你不在其中。");
       })
       .catch((err) => {
@@ -161,6 +172,14 @@ export function RoomPage() {
   useEffect(() => {
     void refreshCards();
   }, [refreshCards]);
+
+  // 已知场景：当前场景 + 所有 NPC 的 scene 标签（去重）。
+  const knownScenes = useMemo(() => {
+    const set = new Set<string>();
+    if (scene) set.add(scene);
+    for (const n of cards?.npcs ?? []) if (n.scene) set.add(n.scene);
+    return [...set];
+  }, [scene, cards]);
 
   // ---- avatar resolver ----------------------------------------------------
   // player msg (author_type 'user'): match author_user_id -> MemberCard.avatar_url
@@ -370,6 +389,56 @@ export function RoomPage() {
           <span className="week-chip" title="叙事时间（每满 4 周月末结算）">
             🗓 第{week}周
           </span>
+          {scene && (
+            <div className="scene-ctrl">
+              <button
+                className="week-chip scene-chip"
+                onClick={() => setSceneMoveOpen((o) => !o)}
+                title="移动到其它场景"
+              >
+                📍 {scene} ▾
+              </button>
+              {sceneMoveOpen && (
+                <div className="scene-pop">
+                  {knownScenes
+                    .filter((s) => s !== scene)
+                    .map((s) => (
+                      <button
+                        key={s}
+                        className="scene-opt"
+                        disabled={aiBusy}
+                        onClick={() => gotoScene(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  <div className="scene-new">
+                    <input
+                      value={sceneDraft}
+                      onChange={(e) => setSceneDraft(e.target.value)}
+                      placeholder="去新地点…"
+                      maxLength={64}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && sceneDraft.trim()) {
+                          gotoScene(sceneDraft);
+                          setSceneDraft("");
+                        }
+                      }}
+                    />
+                    <button
+                      disabled={aiBusy || !sceneDraft.trim()}
+                      onClick={() => {
+                        gotoScene(sceneDraft);
+                        setSceneDraft("");
+                      }}
+                    >
+                      前往
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <span className={`status`}>
             <span className={`dot ${status}`} />
             {status === "open"

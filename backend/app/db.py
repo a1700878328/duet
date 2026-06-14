@@ -25,7 +25,12 @@ SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 # 非破坏性增量迁移（dev/SQLite）：{表: {列: 列定义SQL}}，缺则 ALTER ADD，保数据不丢。
 _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
-    "rooms": {"world_card": "VARCHAR(32)", "week": "INTEGER DEFAULT 1"},
+    "rooms": {
+        "world_card": "VARCHAR(32)",
+        "week": "INTEGER DEFAULT 1",
+        "current_scene": "VARCHAR(64) DEFAULT ''",
+        "scenes_meta": "TEXT",
+    },
     "room_members": {
         "appearance": "VARCHAR(512)",
         "persona": "TEXT",
@@ -36,6 +41,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     "npc_cards": {
         "avatar_url": "VARCHAR(256)",
         "active": "BOOLEAN DEFAULT 1",
+        "scene": "VARCHAR(64)",
     },
 }
 

@@ -32,6 +32,7 @@ async def direct_beat(
     *,
     force_timeskip: bool = False,
     player_state: str = "",
+    scene: str = "",
     brain: BrainProvider | None = None,
 ) -> dict[str, Any]:
     """返回 {"acts": [npc_id...], "time_jump": str|None}。
@@ -73,8 +74,10 @@ async def direct_beat(
         "好感度高的 NPC 可深入互动。让世界对玩家处境做出游戏式反应。"
     )
     state_block = f"\n玩家数值/状态：{player_state}" if player_state else ""
+    scene_block = f"\n当前场景：{scene}（只引入合此地的 NPC）" if scene else ""
     user = (
-        f"世界：{world}\n真人玩家角色：{players}\n在场 NPC：\n{roster}{state_block}\n\n"
+        f"世界：{world}\n真人玩家角色：{players}{scene_block}\n"
+        f"在场 NPC：\n{roster}{state_block}\n\n"
         f"最近场面：\n{recent_scene or '（刚开场）'}\n\n{skip_note}"
     )
     raw = await brain.complete(

@@ -65,6 +65,7 @@ export interface NpcCard {
   created_by_ai: boolean;
   active: boolean;
   avatar_url?: string | null;
+  scene?: string | null;
 }
 
 export interface RoomCards {
@@ -90,6 +91,7 @@ export interface Room {
   ai_mode: AiMode;
   world_card?: string | null;
   week?: number;
+  current_scene?: string;
   members: RoomMember[];
 }
 
@@ -171,6 +173,12 @@ export interface WsWeek {
   week: number;
 }
 
+// 切换到新场景（导演只调当前场景 NPC）。
+export interface WsScene {
+  type: "scene";
+  scene: string;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
@@ -181,12 +189,14 @@ export type WsServerEvent =
   | WsCardsChanged
   | WsStats
   | WsWeek
+  | WsScene
   | WsError;
 
 export type WsClientEvent =
   | { type: "say"; content: string }
   | { type: "advance"; npc_id?: number }
   | { type: "timeskip" }
+  | { type: "goto_scene"; scene: string }
   | { type: "image"; nsfw: boolean }
   | { type: "typing"; is_typing: boolean };
 
