@@ -7,6 +7,8 @@ interface Props {
   streaming?: boolean;
   // Resolved portrait for the speaker (player or NPC); null/undefined = fallback circle.
   avatarUrl?: string | null;
+  // If provided (NPC lines with a voice), shows a 🔊 play/replay button.
+  onPlayVoice?: () => void;
 }
 
 // A round avatar; falls back to a tinted circle with the speaker's initial.
@@ -45,6 +47,7 @@ export function MessageBubble({
   isMe,
   streaming = false,
   avatarUrl,
+  onPlayVoice,
 }: Props) {
   const { author_type, speaker_label, content } = message;
 
@@ -98,6 +101,25 @@ export function MessageBubble({
           <div className="speaker">
             {speaker_label || (isAi ? "NPC" : "对方")}
             {isAi && <span className="tag">NPC / 旁白</span>}
+            {onPlayVoice && (
+              <button
+                type="button"
+                onClick={onPlayVoice}
+                title="播放/重播配音"
+                aria-label="播放配音"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  padding: "0 2px",
+                  marginLeft: 4,
+                  opacity: 0.75,
+                }}
+              >
+                🔊
+              </button>
+            )}
           </div>
         )}
         <div className="bubble">

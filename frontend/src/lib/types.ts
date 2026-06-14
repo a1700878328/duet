@@ -47,6 +47,15 @@ export interface RoomCards {
   npcs: NpcCard[];
 }
 
+// A non-persisted player-character draft for in-room selection (onboarding).
+export interface CharDraft {
+  name: string;
+  persona: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+  avatar_url?: string | null;
+}
+
 export type AiMode = "manual" | "auto";
 
 export interface Room {

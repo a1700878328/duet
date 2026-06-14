@@ -968,3 +968,163 @@ textarea {
 .card-row.npc-row.disabled .card-row-name {
   color: var(--text-dim);
 }
+
+/* ---- 强制选角 onboarding：全屏角色选择器 ---- */
+.char-select-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 6, 14, 0.82);
+  backdrop-filter: blur(10px);
+  animation: toastin 0.18s ease;
+}
+
+.char-select-box {
+  width: min(960px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.char-select-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.char-select-head h2 {
+  margin: 0 0 4px;
+}
+.char-select-head p {
+  margin: 0;
+  font-size: 14px;
+}
+.char-select-skip {
+  flex: none;
+  white-space: nowrap;
+}
+
+.char-select-hint {
+  margin: 0;
+  font-size: 14px;
+}
+
+.char-select-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.char-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.char-card-portrait {
+  aspect-ratio: 3 / 4;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.char-card-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.char-card-noart {
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+.char-card-skeleton {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    100deg,
+    var(--bg-elev-2) 30%,
+    var(--bg-elev) 50%,
+    var(--bg-elev-2) 70%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.char-card-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.char-card-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+.char-card-persona {
+  font-size: 13px;
+  line-height: 1.45;
+  min-height: 2.6em;
+}
+
+.skeleton-line {
+  display: block;
+  height: 0.9em;
+  margin: 4px 0;
+  border-radius: 4px;
+  background: var(--border);
+  animation: shimmer 1.4s ease-in-out infinite;
+  background-image: linear-gradient(
+    100deg,
+    var(--border) 30%,
+    var(--bg-elev) 50%,
+    var(--border) 70%
+  );
+  background-size: 200% 100%;
+}
+.skeleton-line.short {
+  width: 60%;
+}
+
+.char-select-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.char-select-describe {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.char-select-describe .input {
+  flex: 1 1 240px;
+}

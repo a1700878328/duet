@@ -100,6 +100,21 @@ class NpcActiveIn(BaseModel):
     active: bool
 
 
+class CharOptionsIn(BaseModel):
+    count: int = Field(default=3, ge=1, le=4)
+    hint: str | None = Field(default=None, max_length=500)
+
+
+class CharDraftOut(BaseModel):
+    """A non-persisted player-character draft for in-room selection."""
+
+    name: str
+    persona: str
+    appearance: str | None = None
+    voice_id: str | None = None
+    avatar_url: str | None = None
+
+
 class TtsIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     voice_id: str | None = Field(default=None, max_length=200)

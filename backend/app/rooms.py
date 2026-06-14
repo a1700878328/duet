@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .char_gen import generate_character_options
 from .crud import is_member, messages_after, room_to_out
 from .db import get_session
 from .imagegen.portrait import generate_portrait
@@ -17,6 +18,8 @@ from .npc_gen import generate_npcs
 from .schemas import (
     AuthOut,
     CardsOut,
+    CharDraftOut,
+    CharOptionsIn,
     HealthOut,
     LoginIn,
     MeCardUpdateIn,
@@ -242,6 +245,54 @@ async def update_my_card(
     await session.commit()
     await session.refresh(member)
     return _member_card(member, user.display_name)
+
+
+@router.post(
+    "/rooms/{room_id}/character-options",
+    response_model=list[CharDraftOut],
+)
+async def character_options(
+    room_id: int,
+    body: CharOptionsIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[CharDraftOut]:
+    """Generate player-character drafts (with portraits) for in-room selection.
+
+    SLOW: one portrait per draft, generated sequentially (~count*40s). Acceptable
+    for one-time onboarding. Nothing is persisted — selection goes via PUT
+    /me-card. A draft's ``avatar_url`` is null if its portrait failed; a portrait
+    failure never fails the whole request.
+    """
+    await _require_member(session, room_id, user.id)
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
+        )
+    drafts = await generate_character_options(
+        room.world_card, body.hint, body.count
+    )
+    out: list[CharDraftOut] = []
+    for d in drafts:
+        avatar_url: str | None = None
+        appearance = d.get("appearance")
+        if appearance:
+            try:
+                result = await generate_portrait(appearance)
+                avatar_url = result.get("url")
+            except Exception:
+                avatar_url = None
+        out.append(
+            CharDraftOut(
+                name=d["name"],
+                persona=d.get("persona", ""),
+                appearance=appearance,
+                voice_id=d.get("voice_id"),
+                avatar_url=avatar_url,
+            )
+        )
+    return out
 
 
 @router.post("/rooms/{room_id}/npcs", response_model=NpcCardOut)

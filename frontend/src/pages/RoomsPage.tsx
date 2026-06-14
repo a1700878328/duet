@@ -12,12 +12,8 @@ export function RoomsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [newName, setNewName] = useState("");
-  const [newChar, setNewChar] = useState("");
   const [newWorld, setNewWorld] = useState("");
-  const [newAppearance, setNewAppearance] = useState("");
   const [joinId, setJoinId] = useState("");
-  const [joinChar, setJoinChar] = useState("");
-  const [joinAppearance, setJoinAppearance] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -42,12 +38,12 @@ export function RoomsPage() {
     setError(null);
     try {
       const name = newName.trim() || `${user?.display_name ?? "我"}的房间`;
-      const character = newChar.trim() || user?.display_name || "玩家";
+      // Character setup happens in-room via CharacterSelect; default to the
+      // display name so the member exists — the selector sets the real one.
       const room = await api.createRoom({
         name,
-        character_name: character,
+        character_name: user?.display_name || "玩家",
         world_card: newWorld || null,
-        appearance: newAppearance.trim() || null,
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
@@ -63,8 +59,7 @@ export function RoomsPage() {
     setError(null);
     try {
       const room = await api.joinRoom(joinId.trim(), {
-        character_name: joinChar.trim() || user?.display_name || "玩家",
-        appearance: joinAppearance.trim() || null,
+        character_name: user?.display_name || "玩家",
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
@@ -96,18 +91,6 @@ export function RoomsPage() {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
-          <input
-            className="input"
-            placeholder="你扮演的角色名（留空＝用昵称）"
-            value={newChar}
-            onChange={(e) => setNewChar(e.target.value)}
-          />
-          <input
-            className="input"
-            placeholder="角色外貌（可选，如：金色长发 蓝眼 银甲）"
-            value={newAppearance}
-            onChange={(e) => setNewAppearance(e.target.value)}
-          />
           <select
             className="input"
             value={newWorld}
@@ -122,8 +105,7 @@ export function RoomsPage() {
           </button>
         </form>
         <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-          「角色名」＝你在这场戏里扮演的人物（如 艾琳、卡尔），AI
-          会这样称呼你；不确定就留空，用你的昵称。世界卡＝这场戏的背景设定。
+          进入房间后会让你选角色（AI 生成立绘任你挑，或自己描述）。世界卡＝这场戏的背景设定。
         </p>
       </div>
 
@@ -135,18 +117,6 @@ export function RoomsPage() {
             placeholder="房间 ID"
             value={joinId}
             onChange={(e) => setJoinId(e.target.value)}
-          />
-          <input
-            className="input"
-            placeholder="你扮演的角色名（留空＝用昵称）"
-            value={joinChar}
-            onChange={(e) => setJoinChar(e.target.value)}
-          />
-          <input
-            className="input"
-            placeholder="角色外貌（可选）"
-            value={joinAppearance}
-            onChange={(e) => setJoinAppearance(e.target.value)}
           />
           <button className="btn" disabled={busy}>
             加入

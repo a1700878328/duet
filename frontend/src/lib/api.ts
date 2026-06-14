@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  CharDraft,
   MemberCard,
   Message,
   NpcCard,
@@ -158,6 +159,17 @@ export const api = {
   updateMeCard: (roomId: string, body: MeCardBody) =>
     request<MemberCard>(`/rooms/${roomId}/me-card`, {
       method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  // Generate player-character drafts WITH portraits for in-room selection.
+  // SLOW (~count*40s): one portrait per draft. Nothing is persisted.
+  characterOptions: (
+    roomId: string,
+    body: { count?: number; hint?: string },
+  ) =>
+    request<CharDraft[]>(`/rooms/${roomId}/character-options`, {
+      method: "POST",
       body: JSON.stringify(body),
     }),
 

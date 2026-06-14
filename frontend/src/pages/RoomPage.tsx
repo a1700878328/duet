@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { CardPanel } from "../components/CardPanel";
+import { CharacterSelect } from "../components/CharacterSelect";
 import { Composer } from "../components/Composer";
 import { MessageBubble } from "../components/MessageBubble";
 import { api, ApiError, assetUrl } from "../lib/api";
@@ -33,6 +34,8 @@ export function RoomPage() {
   const [autoMode, setAutoMode] = useState(false);
   const [nsfw, setNsfw] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
+  const [charSelectDismissed, setCharSelectDismissed] = useState(false);
 
   // Lifted cards state — shared by bubbles (avatar resolver) and the panel.
   const [cards, setCards] = useState<RoomCards | null>(null);
@@ -123,6 +126,23 @@ export function RoomPage() {
       m.set(n.name, { voice_id: n.voice_id, avatar_url: n.avatar_url });
     return m;
   }, [cards]);
+
+  // Resolve MY member card from the lifted cards (match user_id).
+  const myCard = useMemo(
+    () =>
+      cards?.players.find((p) => String(p.user_id) === String(user?.id)) ??
+      null,
+    [cards, user?.id],
+  );
+  // Force in-room character selection when cards have loaded and my card has
+  // no persona set yet. Dismissible; never blocks the room if skipped.
+  const needsCharSelect =
+    !charSelectDismissed && myCard !== null && !myCard.persona;
+
+  const dismissCharSelect = useCallback(async () => {
+    setCharSelectDismissed(true);
+    await refreshCards();
+  }, [refreshCards]);
 
   const resolveAvatar = useCallback(
     (msg: Pick<Message, "author_type" | "author_user_id" | "speaker_label">) => {
@@ -346,6 +366,11 @@ export function RoomPage() {
             message={m}
             isMe={m.author_type === "user" && m.author_user_id === user?.id}
             avatarUrl={resolveAvatar(m)}
+            onPlayVoice={
+              m.author_type === "ai" && npcByName.has(m.speaker_label)
+                ? () => void enqueueVoice(m)
+                : undefined
+            }
           />
         ))}
 
@@ -451,6 +476,10 @@ export function RoomPage() {
           setPanelOpen(false);
         }}
       />
+
+      {needsCharSelect && (
+        <CharacterSelect roomId={roomId} onDone={dismissCharSelect} />
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
