@@ -16,17 +16,25 @@ _NSFW_TAGS = "nsfw, explicit, uncensored, detailed skin"
 _SFW_TAGS = "sfw, safe, tasteful"
 _BASE_NEGATIVE = (
     "worst quality, low quality, bad anatomy, bad hands, extra fingers, "
-    "missing fingers, watermark, text, signature, jpeg artifacts, blurry"
+    "missing fingers, watermark, signature, jpeg artifacts, blurry, "
+    "text, english text, speech bubble, dialogue, comic panel, caption, "
+    "subtitles, logo, ui, multiple panels"
 )
 
-_SINGLE_SYS = """You are an SDXL prompt engineer for an anime illustration model.
-Convert the user's Chinese roleplay scene + character appearance notes into a
-single English Danbooru-tag prompt. Rules:
+_SINGLE_SYS = """You are an anime image prompt engineer (Danbooru tags) for a model
+with strong multi-subject understanding. Convert the user's Chinese roleplay scene
++ character appearance notes into ONE English Danbooru-tag prompt. Rules:
 - Output ONLY tags, comma-separated, lowercase, no sentences.
-- Start with subject count (1girl / 1boy / etc.), then character appearance,
-  then pose/expression/clothing, then setting/lighting/composition.
-- Weave EACH given appearance note (hair color, eye color, outfit) verbatim into
-  the tags for character consistency. Do NOT invent or change hair/eye colors.
+- Start with the subject count matching the NUMBER of appearance notes given
+  (1girl / 2girls / 2characters / 1boy 1girl / 3characters / etc.).
+- Then, for EACH character, keep their appearance note (hair color, eye color,
+  outfit) grouped with that character's pose/expression — so multiple characters
+  stay distinct. Then the shared setting/lighting/composition/interaction.
+- Weave EACH given appearance note verbatim; do NOT invent or change hair/eye
+  colors. If two characters are present, make clear they are two separate people.
+- Describe ONLY the VISUAL scene (who, where, doing what, expressions, mood).
+  The Chinese text is roleplay context — NEVER output speech-bubble / dialogue /
+  text / comic-panel / caption tags; this is a single illustration, not a comic.
 - {rating_rule}
 - Quality tags are added by the system; do not repeat them.
 Respond with STRICT JSON only: {{"positive": "...", "negative": "..."}}
@@ -112,16 +120,24 @@ async def build_scene_prompt(
     system = sys_tmpl.format(rating_rule=_rating_rule(nsfw))
     user = _user_msg(scene_text, appearances, two_person=two_person)
 
-    # Deterministic-ish: low temperature for stable tagging.
+    # Low temp for stable tagging; raise max_tokens so a thinking model's
+    # reasoning doesn't starve the JSON content (intermittent empty otherwise).
     try:
         brain.temperature = 0.2
+        brain.max_tokens = max(getattr(brain, "max_tokens", 800), 1600)
     except Exception:
         pass
 
-    raw = await brain.complete(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    )
-    data = _extract_json(raw)
+    msgs = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    key = "global" if two_person else "positive"
+    data: dict[str, Any] = {}
+    for _ in range(2):
+        data = _extract_json(await brain.complete(msgs))
+        if _clean(data.get(key, "")):
+            break
 
     rating = _NSFW_TAGS if nsfw else _SFW_TAGS
     quality = f"{_QUALITY_TAGS}, {rating}"

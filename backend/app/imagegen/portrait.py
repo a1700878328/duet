@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .service import generate_raw_single
+from .anima import generate_anima
 
 PORTRAIT_FRAMING = (
     "solo, upper body, portrait, looking at viewer, "
-    "face focus, simple background, high detail"
+    "face focus, simple background, high detail, anime style, masterpiece"
 )
 NEUTRAL_APPEARANCE = "1person, portrait, simple background"
 
@@ -25,16 +25,13 @@ async def generate_portrait(
     nsfw: bool = False,
     seed: int | None = None,
 ) -> dict[str, Any]:
-    """Generate one upper-body avatar from a free-text appearance.
+    """Generate one upper-body avatar (立绘) from a free-text appearance.
 
-    Returns the ``generate_raw_single`` dict: ``{url,path,filename,prompt_id}``
-    on success or ``{error}`` on failure.
+    Uses the Anima DiT path. Returns ``{url,path,filename,prompt_id}`` on
+    success or ``{error}`` on failure.
     """
     appearance = (appearance or "").strip()
-    if not appearance:
-        positive = NEUTRAL_APPEARANCE
-    else:
-        positive = f"{appearance}, {PORTRAIT_FRAMING}"
-    return await generate_raw_single(
-        positive, nsfw=nsfw, landscape=False, seed=seed
-    )
+    positive = f"{appearance}, {PORTRAIT_FRAMING}" if appearance else NEUTRAL_APPEARANCE
+    if nsfw:
+        positive = f"nsfw, {positive}"
+    return await generate_anima(positive, seed=seed)

@@ -17,8 +17,8 @@ from .config import settings
 from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
 from .director import direct_beat
+from .imagegen.anima import generate_anima
 from .imagegen.scene_prompt import build_scene_prompt
-from .imagegen.service import generate_raw_duo, generate_raw_single
 from .lore import store as lore_store
 from .memory import store as memory_store
 from .models import Message, NpcCard, Room, RoomMember, User
@@ -460,23 +460,15 @@ async def _handle_image(
         appearances = [look[c] for c in scene_chars if c in look][:2]
         two_person = len(appearances) >= 2
         try:
+            # Anima DiT 原生多主体：一句 prompt 描述全部出场角色，无区域分区。
             prompt = await build_scene_prompt(
-                scene_text, appearances, nsfw=nsfw, two_person=two_person
+                scene_text, appearances, nsfw=nsfw, two_person=False
             )
-            if two_person:
-                res = await generate_raw_duo(
-                    prompt.get("global", ""),
-                    prompt.get("left", ""),
-                    prompt.get("right", ""),
-                    prompt.get("negative", ""),
-                    nsfw=nsfw,
-                )
-            else:
-                res = await generate_raw_single(
-                    prompt.get("positive", ""),
-                    prompt.get("negative", ""),
-                    nsfw=nsfw,
-                )
+            res = await generate_anima(
+                prompt.get("positive", ""),
+                prompt.get("negative", ""),
+                landscape=two_person,
+            )
         except Exception as exc:  # noqa: BLE001 — surface as room error
             res = {"error": str(exc)}
 
