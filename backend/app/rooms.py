@@ -1,7 +1,7 @@
 """REST endpoints: auth + rooms + messages."""
 
+import hashlib
 import json
-import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -260,6 +260,8 @@ async def update_my_card(
         member.appearance = body.appearance
     if body.voice_id is not None:
         member.voice_id = body.voice_id
+    if body.avatar_url is not None:
+        member.avatar_url = body.avatar_url
     await session.commit()
     await session.refresh(member)
     return _member_card(member, user.display_name)
@@ -482,14 +484,21 @@ _AUDIO_DIR = Path(__file__).resolve().parent / "media" / "audio"
 async def synth_tts(
     room_id: int, body: TtsIn, user: CurrentUser, session: SessionDep
 ) -> TtsOut:
-    """合成一段台词音频（按 voice_id 走 VoxCPM 声音设计），返回 /media 下的 wav url。"""
+    """合成一段台词音频（按 voice_id 走 VoxCPM 声音设计），返回 /media 下的 wav url。
+
+    文件名按 (voice_id + 文本) 内容哈希 → 幂等：同台词同声音只合成一次，
+    之后命中磁盘直接复用，刷新页面/重播都不再重复生成。
+    """
     await _require_member(session, room_id, user.id)
-    audio = await voice_store.synth(body.text, body.voice_id)
-    if not audio:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="语音合成失败"
-        )
-    _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.wav"
-    (_AUDIO_DIR / name).write_bytes(audio)
+    key = f"{(body.voice_id or '').strip()}\x00{body.text.strip()}"
+    name = hashlib.sha1(key.encode("utf-8")).hexdigest() + ".wav"
+    path = _AUDIO_DIR / name
+    if not path.exists():
+        audio = await voice_store.synth(body.text, body.voice_id)
+        if not audio:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail="语音合成失败"
+            )
+        _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(audio)
     return TtsOut(url=f"/media/audio/{name}")

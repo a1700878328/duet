@@ -59,6 +59,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         persona: draft.persona,
         appearance: draft.appearance ?? null,
         voice_id: draft.voice_id ?? null,
+        avatar_url: draft.avatar_url ?? null,
       });
       await onDone();
     } catch (err) {

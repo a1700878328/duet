@@ -9,36 +9,41 @@ interface Props {
   avatarUrl?: string | null;
   // If provided (NPC lines with a voice), shows a 🔊 play/replay button.
   onPlayVoice?: () => void;
+  // Click the speaker's avatar → open the in-page profile popover.
+  onAvatarClick?: () => void;
+  // Click a scene image → open the in-page lightbox.
+  onImageClick?: () => void;
 }
 
 // A round avatar; falls back to a tinted circle with the speaker's initial.
+// Clicking opens the profile popover (never navigates away).
 function Avatar({
   url,
   label,
   variant,
+  onClick,
 }: {
   url?: string | null;
   label: string;
   variant: "me" | "ai" | "other";
+  onClick?: () => void;
 }) {
   const initial = label.trim().charAt(0) || (variant === "ai" ? "🎭" : "?");
-  if (url) {
-    return (
-      <a
-        className="bubble-avatar"
-        href={assetUrl(url)}
-        target="_blank"
-        rel="noreferrer"
-        title={label}
-      >
-        <img src={assetUrl(url)} alt={label} loading="lazy" />
-      </a>
-    );
-  }
+  const inner = url ? (
+    <img src={assetUrl(url)} alt={label} loading="lazy" />
+  ) : (
+    <span aria-hidden>{initial}</span>
+  );
   return (
-    <div className={`bubble-avatar fallback ${variant}`} title={label} aria-hidden>
-      {initial}
-    </div>
+    <button
+      type="button"
+      className={`bubble-avatar${url ? "" : ` fallback ${variant}`}`}
+      title={label}
+      onClick={onClick}
+      disabled={!onClick}
+    >
+      {inner}
+    </button>
   );
 }
 
@@ -48,6 +53,8 @@ export function MessageBubble({
   streaming = false,
   avatarUrl,
   onPlayVoice,
+  onAvatarClick,
+  onImageClick,
 }: Props) {
   const { author_type, speaker_label, content } = message;
 
@@ -63,11 +70,11 @@ export function MessageBubble({
     return (
       <div className={`bubble-row ${isMe ? "me" : "other"}`}>
         {!isMe && <div className="speaker">{speaker_label || "场景图"}</div>}
-        <a
+        <button
+          type="button"
           className="image-bubble"
-          href={assetUrl(content)}
-          target="_blank"
-          rel="noreferrer"
+          onClick={onImageClick}
+          title="点击查看大图"
         >
           <img
             src={assetUrl(content)}
@@ -79,7 +86,7 @@ export function MessageBubble({
               display: "block",
             }}
           />
-        </a>
+        </button>
       </div>
     );
   }
@@ -90,7 +97,12 @@ export function MessageBubble({
   const label = speaker_label || (isAi ? "NPC" : isMe ? "我" : "对方");
 
   const avatar = (
-    <Avatar url={avatarUrl} label={label} variant={variant} />
+    <Avatar
+      url={avatarUrl}
+      label={label}
+      variant={variant}
+      onClick={onAvatarClick}
+    />
   );
 
   return (

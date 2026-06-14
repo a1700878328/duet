@@ -42,6 +42,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "avatar_url": "VARCHAR(256)",
         "active": "BOOLEAN DEFAULT 1",
         "scene": "VARCHAR(64)",
+        "discovered": "TEXT",
     },
 }
 

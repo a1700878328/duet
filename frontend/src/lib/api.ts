@@ -14,6 +14,7 @@ export interface MeCardBody {
   persona?: string;
   appearance?: string | null;
   voice_id?: string | null;
+  avatar_url?: string | null;
 }
 
 export interface NpcBody {

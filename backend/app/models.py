@@ -136,6 +136,10 @@ class NpcCard(Base):
     scene: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # 玩家逐渐了解到的信息：随剧情累积刷新（区别于作者设定的 persona）。
+    discovered: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )

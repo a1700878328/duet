@@ -66,6 +66,7 @@ export interface NpcCard {
   active: boolean;
   avatar_url?: string | null;
   scene?: string | null;
+  discovered?: string | null;
 }
 
 export interface RoomCards {

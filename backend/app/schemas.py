@@ -73,6 +73,7 @@ class MeCardUpdateIn(BaseModel):
     persona: str | None = Field(default=None, max_length=4000)
     appearance: str | None = Field(default=None, max_length=512)
     voice_id: str | None = Field(default=None, max_length=64)
+    avatar_url: str | None = Field(default=None, max_length=256)
 
 
 class NpcCardIn(BaseModel):
@@ -98,6 +99,7 @@ class NpcCardOut(BaseModel):
     avatar_url: str | None = None
     active: bool = True
     scene: str | None = None
+    discovered: str | None = None
     created_by_ai: bool
 
 

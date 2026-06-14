@@ -11,6 +11,11 @@ import { CardPanel } from "../components/CardPanel";
 import { CharacterSelect } from "../components/CharacterSelect";
 import { Composer } from "../components/Composer";
 import { MessageBubble } from "../components/MessageBubble";
+import {
+  ImageLightbox,
+  ProfileModal,
+  type ProfileView,
+} from "../components/RoomOverlays";
 import { StatsPanel } from "../components/StatsPanel";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -64,6 +69,10 @@ export function RoomPage() {
   const [scene, setScene] = useState("");
   const [sceneMoveOpen, setSceneMoveOpen] = useState(false);
   const [sceneDraft, setSceneDraft] = useState("");
+  // 页内悬浮窗：点头像看资料 / 点图看大图。
+  const [overlay, setOverlay] = useState<
+    { kind: "image"; url: string } | { kind: "profile"; profile: ProfileView } | null
+  >(null);
   // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
   const [charSelectDismissed, setCharSelectDismissed] = useState(false);
 
@@ -238,6 +247,46 @@ export function RoomPage() {
     [playerAvatars, npcByName],
   );
 
+  // Resolve a message's speaker → profile popover (player stats / NPC info).
+  const openProfile = useCallback(
+    (msg: Message) => {
+      if (msg.author_type === "user") {
+        const p = cards?.players.find(
+          (x) => String(x.user_id) === String(msg.author_user_id),
+        );
+        if (!p) return;
+        const isSelf = String(p.user_id) === String(user?.id);
+        setOverlay({
+          kind: "profile",
+          profile: {
+            kind: "player",
+            name: p.character_name,
+            avatarUrl: p.avatar_url,
+            appearance: p.appearance,
+            persona: p.persona,
+            stats: isSelf ? (myStats ?? p.stats ?? null) : (p.stats ?? null),
+          },
+        });
+      } else if (msg.author_type === "ai") {
+        const n = cards?.npcs.find((x) => x.name === msg.speaker_label);
+        if (!n) return; // 旁白/未知讲述者不弹资料
+        setOverlay({
+          kind: "profile",
+          profile: {
+            kind: "npc",
+            name: n.name,
+            avatarUrl: n.avatar_url,
+            appearance: n.appearance,
+            persona: n.persona,
+            scene: n.scene,
+            discovered: n.discovered,
+          },
+        });
+      }
+    },
+    [cards, user?.id, myStats],
+  );
+
   // Auto-scroll handling: stick to bottom unless the user scrolled up.
   const timelineRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -274,8 +323,31 @@ export function RoomPage() {
 
   // ---- voice playback -----------------------------------------------------
   // Serialize TTS via one <audio>; cache by seq so a line is synthesized once.
+  // The seq→url map is persisted to localStorage so replays survive reloads
+  // (the backend also dedupes by content hash, so even a cache miss won't
+  // re-synthesize — it just re-points to the same durable /media file).
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsCacheKey = `duet:tts:${roomId}`;
   const ttsCacheRef = useRef<Map<number, string>>(new Map());
+  // Hydrate the cache once from localStorage on mount.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(ttsCacheKey);
+      if (raw) ttsCacheRef.current = new Map(JSON.parse(raw));
+    } catch {
+      /* ignore corrupt cache */
+    }
+  }, [ttsCacheKey]);
+  const persistTtsCache = useCallback(() => {
+    try {
+      window.localStorage.setItem(
+        ttsCacheKey,
+        JSON.stringify([...ttsCacheRef.current]),
+      );
+    } catch {
+      /* quota / disabled storage — non-fatal */
+    }
+  }, [ttsCacheKey]);
   const playQueueRef = useRef<string[]>([]);
   const playingRef = useRef(false);
   const lastVoiceSeqRef = useRef(0);
@@ -320,6 +392,7 @@ export function RoomPage() {
       try {
         const { url } = await api.tts(roomId, text, voiceId);
         ttsCacheRef.current.set(msg.seq, url);
+        persistTtsCache();
         playQueueRef.current.push(url);
         drainQueue();
       } catch {
@@ -328,7 +401,7 @@ export function RoomPage() {
         setVoicing(false);
       }
     },
-    [roomId, npcByName, drainQueue, showToast],
+    [roomId, npcByName, drainQueue, showToast, persistTtsCache],
   );
 
   // When voice is ON, synthesize+play NEW NPC/AI lines (skip 旁白/system/player).
@@ -515,6 +588,12 @@ export function RoomPage() {
                 ? () => void enqueueVoice(m)
                 : undefined
             }
+            onAvatarClick={() => openProfile(m)}
+            onImageClick={
+              m.author_type === "image"
+                ? () => setOverlay({ kind: "image", url: m.content })
+                : undefined
+            }
           />
         ))}
 
@@ -630,6 +709,16 @@ export function RoomPage() {
 
       {needsCharSelect && (
         <CharacterSelect roomId={roomId} onDone={dismissCharSelect} />
+      )}
+
+      {overlay?.kind === "profile" && (
+        <ProfileModal
+          profile={overlay.profile}
+          onClose={() => setOverlay(null)}
+        />
+      )}
+      {overlay?.kind === "image" && (
+        <ImageLightbox url={overlay.url} onClose={() => setOverlay(null)} />
       )}
 
       {deltaFlash && (

@@ -842,6 +842,27 @@ textarea {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.card-row-scene {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.card-row-discovered {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text, #ddd);
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  border-left: 2px solid var(--accent, #8a7bff);
+  border-radius: 0 6px 6px 0;
+  padding: 5px 8px;
+}
+.discovered-label {
+  display: inline-block;
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--accent, #8a7bff);
+}
 
 .npc-list {
   display: flex;
@@ -946,6 +967,7 @@ textarea {
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
+  padding: 0;
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -954,6 +976,13 @@ textarea {
   place-items: center;
   text-decoration: none;
   align-self: flex-end;
+  cursor: pointer;
+}
+.bubble-avatar:disabled {
+  cursor: default;
+}
+.bubble-avatar:not(:disabled):hover {
+  border-color: var(--accent, #6c5ce7);
 }
 .bubble-avatar img {
   width: 100%;
@@ -1335,4 +1364,155 @@ textarea {
   .stat-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- in-page overlays: profile popover + image lightbox ---- */
+.image-bubble {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: block;
+}
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(2px);
+  animation: overlay-in 0.14s ease-out;
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+.overlay-inner {
+  max-width: 100%;
+  max-height: 100%;
+}
+.lightbox-img {
+  max-width: min(92vw, 1100px);
+  max-height: 90vh;
+  border-radius: 12px;
+  display: block;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.pf-card {
+  position: relative;
+  width: min(420px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--surface, #1b1b22);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.pf-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: none;
+  background: var(--surface-2, rgba(255, 255, 255, 0.08));
+  color: var(--text-dim);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.pf-portrait {
+  width: 128px;
+  height: 128px;
+  margin: 4px auto 12px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+.pf-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pf-portrait-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.pf-name {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text, #eee);
+  margin-bottom: 14px;
+}
+.pf-kind {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.pf-section {
+  margin-top: 12px;
+}
+.pf-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #8a7bff);
+  margin-bottom: 4px;
+}
+.pf-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #ddd);
+  white-space: pre-wrap;
+}
+.pf-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+}
+.pf-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--border, rgba(255, 255, 255, 0.08));
+  padding-bottom: 2px;
+}
+.pf-stat-k {
+  color: var(--text-dim);
+}
+.pf-stat-v {
+  color: var(--text, #eee);
+  font-weight: 600;
+}
+.pf-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pf-tag {
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(255, 120, 160, 0.14);
+  border: 1px solid rgba(255, 120, 160, 0.3);
+  color: #ff9ab5;
+}
+.pf-tag.fav {
+  background: rgba(120, 200, 255, 0.12);
+  border-color: rgba(120, 200, 255, 0.3);
+  color: #9cd3ff;
 }

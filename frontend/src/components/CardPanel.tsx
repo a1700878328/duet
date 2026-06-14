@@ -365,6 +365,15 @@ export function CardPanel({
                           )}
                         </div>
                         <div className="card-row-sub muted">{npc.persona}</div>
+                        {npc.scene && (
+                          <div className="card-row-scene">📍 {npc.scene}</div>
+                        )}
+                        {npc.discovered && (
+                          <div className="card-row-discovered">
+                            <span className="discovered-label">📖 已了解</span>
+                            {npc.discovered}
+                          </div>
+                        )}
                       </div>
                       <label
                         className="toggle npc-active-toggle"

@@ -18,6 +18,7 @@ from .config import settings
 from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
 from .director import direct_beat
+from .enrich import enrich_npc
 from .imagegen.anima import generate_anima
 from .imagegen.scene_prompt import build_scene_prompt
 from .lore import store as lore_store
@@ -51,6 +52,8 @@ class RoomCoordinator:
         self.lock = asyncio.Lock()
         self.ai_busy = False
         self.image_busy = False
+        # 节流：每 N 拍后把"玩家逐渐了解到的 NPC 信息"刷新一次。
+        self.beats_since_enrich = 0
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         stale: list[WebSocket] = []
@@ -333,6 +336,41 @@ def _player_state_summary(members: list[RoomMember]) -> str:
     return " ｜ ".join(parts)
 
 
+_ENRICH_EVERY_BEATS = 3  # 每 3 拍刷新一次"已了解"档案，控成本。
+
+
+async def _enrich_npcs(coord: RoomCoordinator, npc_ids: list[int]) -> None:
+    """后台：把最近对话里新浮现的信息并入这些 NPC 的"已了解"档案。"""
+    if not npc_ids:
+        return
+    async with SessionFactory() as session:
+        history = await messages_after(session, coord.room_id, 0, limit=200)
+    recent = "\n".join(
+        f"{m.speaker_label}: {m.content}"
+        for m in history[-16:]
+        if m.author_type in {"user", "ai"}
+    )
+    if not recent:
+        return
+    changed = False
+    for npc_id in npc_ids:
+        async with SessionFactory() as session:
+            npc = await session.get(NpcCard, npc_id)
+            if npc is None:
+                continue
+            name, persona, prior = npc.name, npc.persona, npc.discovered
+        updated = await enrich_npc(name, persona, prior, recent)
+        if updated and updated != (prior or ""):
+            async with SessionFactory() as session:
+                npc = await session.get(NpcCard, npc_id)
+                if npc is not None:
+                    npc.discovered = updated
+                    await session.commit()
+                    changed = True
+    if changed:
+        await coord.broadcast({"type": "cards_changed"})
+
+
 async def _advance_week(coord: RoomCoordinator) -> None:
     """推进叙事时间一周；每满 4 周月末结算（扣食宿→可能负债）并广播。"""
     settlements: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
@@ -483,16 +521,25 @@ async def _handle_director_beat(
         # 现有 NPC 反应 + 新登场 NPC 自报登场
         act_ids = list(plan.get("acts", [])) + [n.id for n in introduced]
         acted = False
+        spoke_ids: list[int] = []
         for npc_id in act_ids:
             npc = by_id.get(npc_id)
             if npc is not None:
                 await _run_ai_turn(coord, npc)
                 acted = True
+                spoke_ids.append(npc_id)
 
         if not acted and not plan.get("time_jump"):
             await _run_ai_turn(coord, None)
     finally:
         coord.ai_busy = False
+
+    # 信息渐显：节流地后台刷新"玩家逐渐了解到的 NPC 信息"（不挡主流程）。
+    if spoke_ids:
+        coord.beats_since_enrich += 1
+        if coord.beats_since_enrich >= _ENRICH_EVERY_BEATS:
+            coord.beats_since_enrich = 0
+            asyncio.create_task(_enrich_npcs(coord, list(set(spoke_ids))))
 
 
 async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
