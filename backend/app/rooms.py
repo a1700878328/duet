@@ -47,6 +47,7 @@ from .security import (
 )
 from .stats import default_stats
 from .voice import store as voice_store
+from .world_presets import preset_npcs
 
 router = APIRouter(prefix="/api")
 
@@ -132,6 +133,18 @@ async def create_room(
             appearance=body.appearance,
         )
     )
+    # 世界卡常驻主要 NPC：开场就在场（NPC 数非 0），其余怪物由 director 临场引入。
+    for p in preset_npcs(room.world_card):
+        session.add(
+            NpcCard(
+                room_id=room.id,
+                name=p["name"],
+                persona=p["persona"],
+                appearance=p.get("appearance"),
+                voice_id=p.get("voice_id"),
+                created_by_ai=True,
+            )
+        )
     await session.commit()
     await session.refresh(room)
     return await room_to_out(session, room)
