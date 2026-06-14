@@ -6,6 +6,7 @@ flag so only one AI turn runs at a time.
 """
 
 import asyncio
+import json
 import uuid
 from typing import Any
 
@@ -30,6 +31,7 @@ from .prompts import (
 from .schemas import MessageOut
 from .security import user_from_token
 from .speaker_guard import sanitize
+from .stats import apply_delta, default_stats, judge_stat_delta
 
 router = APIRouter()
 
@@ -494,6 +496,49 @@ async def _handle_image(
         coord.image_busy = False
 
 
+async def _judge_and_apply_stats(coord: RoomCoordinator, user_id: int) -> None:
+    """裁判：本回合剧情 → AI 判定属性增量 → 应用到该玩家 + 广播。"""
+    async with SessionFactory() as session:
+        member = await session.scalar(
+            select(RoomMember).where(
+                RoomMember.room_id == coord.room_id,
+                RoomMember.user_id == user_id,
+            )
+        )
+        if member is None:
+            return
+        history = await messages_after(session, coord.room_id, 0, limit=200)
+        current = json.loads(member.stats) if member.stats else default_stats()
+    scene = "\n".join(
+        f"{m.speaker_label}: {m.content}"
+        for m in history[-6:]
+        if m.author_type in {"user", "ai"}
+    )
+    if not scene.strip():
+        return
+    try:
+        delta = await judge_stat_delta(scene, current)
+    except Exception:  # noqa: BLE001 — best-effort, never break the room
+        delta = {}
+    if not delta:
+        return
+    new_stats = apply_delta(current, delta)
+    async with SessionFactory() as session:
+        member = await session.scalar(
+            select(RoomMember).where(
+                RoomMember.room_id == coord.room_id,
+                RoomMember.user_id == user_id,
+            )
+        )
+        if member is None:
+            return
+        member.stats = json.dumps(new_stats, ensure_ascii=False)
+        await session.commit()
+    await coord.broadcast(
+        {"type": "stats", "user_id": user_id, "stats": new_stats, "delta": delta}
+    )
+
+
 @router.websocket("/ws/rooms/{room_id}")
 async def room_ws(websocket: WebSocket, room_id: int) -> None:
     token = websocket.query_params.get("token", "")
@@ -551,8 +596,10 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
                 else:
                     # 无指定 NPC → 导演自动调度本拍谁反应。
                     await _handle_director_beat(coord)
+                asyncio.create_task(_judge_and_apply_stats(coord, user.id))
             elif kind == "timeskip":
                 await _handle_director_beat(coord, force_timeskip=True)
+                asyncio.create_task(_judge_and_apply_stats(coord, user.id))
             elif kind == "image":
                 asyncio.create_task(_handle_image(coord, user, data))
             elif kind == "typing":

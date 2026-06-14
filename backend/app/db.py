@@ -31,6 +31,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "persona": "TEXT",
         "voice_id": "VARCHAR(64)",
         "avatar_url": "VARCHAR(256)",
+        "stats": "TEXT",
     },
     "npc_cards": {
         "avatar_url": "VARCHAR(256)",

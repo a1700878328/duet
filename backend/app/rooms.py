@@ -1,5 +1,6 @@
 """REST endpoints: auth + rooms + messages."""
 
+import json
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -44,6 +45,7 @@ from .security import (
     hash_password,
     verify_password,
 )
+from .stats import default_stats
 from .voice import store as voice_store
 
 router = APIRouter(prefix="/api")
@@ -197,6 +199,7 @@ def _member_card(m: RoomMember, display_name: str) -> MemberOut:
         persona=m.persona,
         voice_id=m.voice_id,
         avatar_url=m.avatar_url,
+        stats=json.loads(m.stats) if m.stats else default_stats(),
     )
 
 

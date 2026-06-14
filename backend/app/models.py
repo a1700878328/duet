@@ -69,6 +69,8 @@ class RoomMember(Base):
     voice_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # 游戏层属性表（JSON 字符串：等级/经验/淫乱/各开发/状态/好感度…）。None=用默认表。
+    stats: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
     avatar_url: Mapped[str | None] = mapped_column(
         String(256), nullable=True, default=None

@@ -1,6 +1,7 @@
 """Pydantic v2 request/response schemas."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +42,7 @@ class MemberOut(BaseModel):
     persona: str | None = None
     voice_id: str | None = None
     avatar_url: str | None = None
+    stats: dict[str, Any] | None = None
 
 
 class RoomOut(BaseModel):
