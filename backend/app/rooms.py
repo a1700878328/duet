@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .char_gen import generate_character_options
 from .crud import is_member, messages_after, room_to_out
 from .db import get_session
+from .imagegen.anima import char_seed
 from .imagegen.portrait import generate_portrait
 from .models import NpcCard, Room, RoomMember, User
 from .npc_gen import generate_npcs
@@ -422,7 +423,8 @@ async def generate_my_avatar(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
     result = await generate_portrait(
-        member.appearance or member.character_name or "1person"
+        member.appearance or member.character_name or "1person",
+        seed=char_seed(room_id, member.character_name or str(member.user_id)),
     )
     if not result.get("url"):
         raise HTTPException(
@@ -445,7 +447,10 @@ async def generate_npc_avatar(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
         )
-    result = await generate_portrait(npc.appearance or npc.name or "1person")
+    result = await generate_portrait(
+        npc.appearance or npc.name or "1person",
+        seed=char_seed(room_id, npc.name),
+    )
     if not result.get("url"):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

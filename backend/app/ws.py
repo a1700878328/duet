@@ -19,7 +19,7 @@ from .crud import member_label, messages_after, next_seq
 from .db import SessionFactory
 from .director import direct_beat
 from .enrich import enrich_npc
-from .imagegen.anima import generate_anima
+from .imagegen.anima import char_seed, generate_anima
 from .imagegen.scene_prompt import build_scene_prompt
 from .lore import store as lore_store
 from .memory import store as memory_store
@@ -688,15 +688,24 @@ async def _handle_image(
             scene_chars = [m.character_name for m in members if m.character_name][:2]
         appearances = [look[c] for c in scene_chars if c in look][:2]
         two_person = len(appearances) >= 2
+        # 人物一致性（无 LoRA/FaceID）：主角恒定 seed + 外貌卡逐字并入 prompt，
+        # 让同一角色的立绘与历次场景图尽量长得一样。
+        primary = scene_chars[0] if scene_chars else None
+        seed = char_seed(coord.room_id, primary) if primary else None
         try:
             # Anima DiT 原生多主体：一句 prompt 描述全部出场角色，无区域分区。
             prompt = await build_scene_prompt(
                 scene_text, appearances, nsfw=nsfw, two_person=False
             )
+            verbatim = ", ".join(a for a in appearances if a)
+            positive = prompt.get("positive", "")
+            if verbatim:
+                positive = f"{positive}, {verbatim}" if positive else verbatim
             res = await generate_anima(
-                prompt.get("positive", ""),
+                positive,
                 prompt.get("negative", ""),
                 landscape=two_person,
+                seed=seed,
             )
         except Exception as exc:  # noqa: BLE001 — surface as room error
             res = {"error": str(exc)}

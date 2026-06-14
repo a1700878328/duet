@@ -33,6 +33,7 @@ Node quirks worth knowing:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import random
 import time
 import uuid
@@ -43,6 +44,16 @@ import httpx
 
 from .client import ensure_comfyui
 from .config import COMFY_URL
+
+
+def char_seed(room_id: int, name: str) -> int:
+    """同一角色（房间+名字）恒得同一 seed → 立绘与场景图人物更一致。
+
+    无 LoRA/FaceID 时，固定 seed + 同一外貌 tag 是基模保持人物一致的主要手段。
+    """
+    h = hashlib.sha1(f"{room_id}\x00{name}".encode()).hexdigest()
+    return int(h[:8], 16)
+
 
 Graph = dict[str, dict[str, Any]]
 
