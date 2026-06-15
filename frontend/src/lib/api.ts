@@ -52,11 +52,11 @@ const TOKEN_KEY = "duet.token";
 const USER_KEY = "duet.user";
 
 export function getToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY);
 }
 
 export function getStoredUser(): User | null {
-  const raw = sessionStorage.getItem(USER_KEY);
+  const raw = sessionStorage.getItem(USER_KEY) ?? localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as User;
@@ -68,8 +68,8 @@ export function getStoredUser(): User | null {
 export function storeAuth(auth: AuthResponse): void {
   sessionStorage.setItem(TOKEN_KEY, auth.token);
   sessionStorage.setItem(USER_KEY, JSON.stringify(auth.user));
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  localStorage.setItem(TOKEN_KEY, auth.token);
+  localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
 }
 
 export function clearAuth(): void {
