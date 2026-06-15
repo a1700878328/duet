@@ -61,9 +61,7 @@ class BrainProvider:
             "Content-Type": "application/json",
         }
 
-    async def stream(
-        self, messages: list[dict[str, str]]
-    ) -> AsyncIterator[str]:
+    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         """Yield content chunks (reasoning_content ignored)."""
         body = self._body(messages, stream=True)
         async with httpx.AsyncClient(

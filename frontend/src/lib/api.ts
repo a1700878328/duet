@@ -6,7 +6,9 @@ import type {
   NpcCard,
   Room,
   RoomCards,
+  SceneLogResponse,
   User,
+  UserCharacterCard,
 } from "./types";
 
 export interface MeCardBody {
@@ -15,6 +17,20 @@ export interface MeCardBody {
   appearance?: string | null;
   voice_id?: string | null;
   avatar_url?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
+  reset_stats?: boolean;
+}
+
+export interface UserCharacterCardBody {
+  name: string;
+  persona: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
+  avatar_url?: string | null;
+  source_world_card?: string | null;
 }
 
 export interface NpcBody {
@@ -36,11 +52,11 @@ const TOKEN_KEY = "duet.token";
 const USER_KEY = "duet.user";
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function getStoredUser(): User | null {
-  const raw = localStorage.getItem(USER_KEY);
+  const raw = sessionStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as User;
@@ -50,11 +66,15 @@ export function getStoredUser(): User | null {
 }
 
 export function storeAuth(auth: AuthResponse): void {
-  localStorage.setItem(TOKEN_KEY, auth.token);
-  localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+  sessionStorage.setItem(TOKEN_KEY, auth.token);
+  sessionStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
 }
 
 export function clearAuth(): void {
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
@@ -131,6 +151,24 @@ export const api = {
 
   me: () => request<{ user: User }>("/me"),
 
+  listMyCharacterCards: () =>
+    request<UserCharacterCard[]>("/me/character-cards"),
+
+  createMyCharacterCard: (body: UserCharacterCardBody) =>
+    request<UserCharacterCard>("/me/character-cards", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateMyCharacterCard: (id: number, body: UserCharacterCardBody) =>
+    request<UserCharacterCard>(`/me/character-cards/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteMyCharacterCard: (id: number) =>
+    request<void>(`/me/character-cards/${id}`, { method: "DELETE" }),
+
   listRooms: () => request<Room[]>("/rooms"),
 
   createRoom: (body: {
@@ -155,10 +193,19 @@ export const api = {
   messages: (id: string, afterSeq = 0) =>
     request<Message[]>(`/rooms/${id}/messages?after_seq=${afterSeq}`),
 
+  sceneLog: (id: string) =>
+    request<SceneLogResponse>(`/rooms/${id}/scene-log`),
+
   // ---- character cards / NPCs ----
 
   getCards: (roomId: string) =>
     request<RoomCards>(`/rooms/${roomId}/cards`),
+
+  presetCharacters: (roomId: string) =>
+    request<NpcCard[]>(`/rooms/${roomId}/preset-characters`),
+
+  getProtagonist: (roomId: string) =>
+    request<CharDraft | null>(`/rooms/${roomId}/protagonist`),
 
   updateMeCard: (roomId: string, body: MeCardBody) =>
     request<MemberCard>(`/rooms/${roomId}/me-card`, {
@@ -206,9 +253,21 @@ export const api = {
       method: "POST",
     }),
 
+  // Ask AI to create a role voice design and reference sample.
+  generateMyVoice: (roomId: string) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card/voice`, {
+      method: "POST",
+    }),
+
   // Generate an NPC's portrait (slow ~30-60s).
   generateNpcAvatar: (roomId: string, npcId: number) =>
     request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/avatar`, {
+      method: "POST",
+    }),
+
+  // Generate an NPC's role voice reference sample.
+  generateNpcVoice: (roomId: string, npcId: number) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/voice`, {
       method: "POST",
     }),
 
@@ -220,10 +279,23 @@ export const api = {
     }),
 
   // Synthesize a line to a wav (~5-10s); returns a /media/audio url.
-  tts: (roomId: string, text: string, voiceId?: string | null) =>
+  tts: (
+    roomId: string,
+    text: string,
+    voiceId?: string | null,
+    voiceRefUrl?: string | null,
+    voiceRefText?: string | null,
+    regenerate = false,
+  ) =>
     request<{ url: string }>(`/rooms/${roomId}/tts`, {
       method: "POST",
-      body: JSON.stringify({ text, voice_id: voiceId ?? null }),
+      body: JSON.stringify({
+        text,
+        voice_id: voiceId ?? null,
+        voice_ref_url: voiceRefUrl ?? null,
+        voice_ref_text: voiceRefText ?? null,
+        regenerate,
+      }),
     }),
 };
 
@@ -237,4 +309,10 @@ export function roomSocketUrl(roomId: string, token: string): string {
   const base = API_BASE || window.location.origin;
   const wsBase = base.replace(/^http/, "ws");
   return `${wsBase}/ws/rooms/${roomId}?token=${encodeURIComponent(token)}`;
+}
+
+export function lobbySocketUrl(token: string): string {
+  const base = API_BASE || window.location.origin;
+  const wsBase = base.replace(/^http/, "ws");
+  return `${wsBase}/ws/lobby?token=${encodeURIComponent(token)}`;
 }

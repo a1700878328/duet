@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { CardPanel } from "../components/CardPanel";
 import { CharacterSelect } from "../components/CharacterSelect";
@@ -19,8 +20,16 @@ import {
 import { StatsPanel } from "../components/StatsPanel";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { MEDIA_GENERATION_ENABLED, VOICE_GENERATION_ENABLED } from "../lib/features";
 import { useRoomSocket, type StatsEvent } from "../lib/useRoomSocket";
-import type { CharStats, Message, RoomCards, Room, StatValue } from "../lib/types";
+import type {
+  CharStats,
+  Message,
+  RoomCards,
+  Room,
+  SceneLogResponse,
+  StatValue,
+} from "../lib/types";
 
 const NEAR_BOTTOM_PX = 80;
 
@@ -37,6 +46,8 @@ function formatDelta(delta: Record<string, StatValue>): string {
       for (const s of val) parts.push(`⛓${s}`);
     } else if (key === "状态_del" && Array.isArray(val)) {
       for (const s of val) parts.push(`✓解除${s}`);
+    } else if (key === "物品_add" && Array.isArray(val)) {
+      for (const s of val) parts.push(`🎁${s}`);
     } else if (key === "好感度" && val && typeof val === "object") {
       for (const [npc, dv] of Object.entries(val as Record<string, number>)) {
         if (dv) parts.push(`♥${npc}${dv > 0 ? "+" : ""}${dv}`);
@@ -59,22 +70,27 @@ export function RoomPage() {
   const [room, setRoom] = useState<Room | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [autoMode, setAutoMode] = useState(false);
-  const [nsfw, setNsfw] = useState(false);
+  const [sayDraft, setSayDraft] = useState<string | null>(null);
+  const [polishingSay, setPolishingSay] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
-  // 叙事时间：第 N 周（room 元数据 seed，week 事件实时更新）。
-  const [week, setWeek] = useState(1);
-  // 当前场景标签（""=自由世界无分区）；移动面板开关。
+  // 叙事时间：世界进度 / 日内节点。
+  const [timeLabel, setTimeLabel] = useState("冒险第1周·第1天·清晨");
+  // 当前场景标签（""=自由世界无分区）。
   const [scene, setScene] = useState("");
-  const [sceneMoveOpen, setSceneMoveOpen] = useState(false);
-  const [sceneDraft, setSceneDraft] = useState("");
+  const [sceneLogOpen, setSceneLogOpen] = useState(false);
+  const [sceneLog, setSceneLog] = useState<SceneLogResponse | null>(null);
+  const [sceneLogLoading, setSceneLogLoading] = useState(false);
+  const [selectedScene, setSelectedScene] = useState("");
+  const [sceneMoveText, setSceneMoveText] = useState("");
+  const sceneLogEntriesRef = useRef<HTMLDivElement>(null);
   // 页内悬浮窗：点头像看资料 / 点图看大图。
   const [overlay, setOverlay] = useState<
     { kind: "image"; url: string } | { kind: "profile"; profile: ProfileView } | null
   >(null);
   // Forced onboarding: dismissed once chosen or skipped (one-time per visit).
   const [charSelectDismissed, setCharSelectDismissed] = useState(false);
+  const [charSelectForced, setCharSelectForced] = useState(false);
 
   // My live stat sheet — seeded from my card, updated by "stats" WS events.
   const [myStats, setMyStats] = useState<CharStats | null>(null);
@@ -84,6 +100,14 @@ export function RoomPage() {
 
   // Lifted cards state — shared by bubbles (avatar resolver) and the panel.
   const [cards, setCards] = useState<RoomCards | null>(null);
+  const refreshRoom = useCallback(async () => {
+    const rooms = await api.listRooms();
+    const found = rooms.find((r) => String(r.id) === String(roomId)) ?? null;
+    setRoom(found);
+    if (found?.time_label) setTimeLabel(found.time_label);
+    if (found?.current_scene) setScene(found.current_scene);
+    if (!found) setLoadError("未找到房间，或你不在其中。");
+  }, [roomId]);
   const refreshCards = useCallback(async () => {
     try {
       setCards(await api.getCards(roomId));
@@ -91,9 +115,11 @@ export function RoomPage() {
       /* best-effort; panel surfaces its own errors */
     }
   }, [roomId]);
+  const handleCardsChanged = useCallback(() => {
+    void refreshCards();
+    void refreshRoom();
+  }, [refreshCards, refreshRoom]);
 
-  // Voice playback (off by default).
-  const [voiceOn, setVoiceOn] = useState(false);
   const [voicing, setVoicing] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
@@ -102,10 +128,30 @@ export function RoomPage() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+  const refreshSceneLog = useCallback(async () => {
+    setSceneLogLoading(true);
+    try {
+      const data = await api.sceneLog(roomId);
+      setSceneLog(data);
+      if (data.current_scene) setScene(data.current_scene);
+      setSelectedScene((prev) =>
+        prev && data.scenes.includes(prev) ? prev : data.current_scene,
+      );
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "加载场景记录失败");
+    } finally {
+      setSceneLogLoading(false);
+    }
+  }, [roomId, showToast]);
+  const openSceneLog = useCallback(() => {
+    setSceneLogOpen(true);
+    void refreshSceneLog();
+  }, [refreshSceneLog]);
 
   const handleWsError = useCallback(
     (code: string, detail: string) => {
-      if (code === "ai_busy") showToast("AI 正在接话，请稍候…");
+      setPolishingSay(false);
+      if (code === "ai_busy") showToast("剧情正在推进，请稍候…");
       else showToast(detail || `错误：${code}`);
     },
     [showToast],
@@ -125,10 +171,15 @@ export function RoomPage() {
     [user?.id],
   );
 
-  const handleWeek = useCallback((w: number) => setWeek(w), []);
+  const handleTime = useCallback(
+    (ev: { week: number; day: number; time_slot: number; time_label: string }) => {
+      setTimeLabel(ev.time_label);
+    },
+    [],
+  );
   const handleScene = useCallback((s: string) => {
     setScene(s);
-    setSceneMoveOpen(false);
+    setSelectedScene((prev) => prev || s);
   }, []);
 
   const {
@@ -139,34 +190,41 @@ export function RoomPage() {
     aiBusy,
     imaging,
     say,
+    polishSay,
     advance,
-    timeskip,
-    requestImage,
     gotoScene,
+    payNpc,
+    describeScene,
+    requestImage,
+    godWhisper,
     setTyping,
   } = useRoomSocket({
     roomId,
     token: token ?? "",
     onError: handleWsError,
-    onCardsChanged: refreshCards,
+    onCardsChanged: handleCardsChanged,
     onStats: handleStats,
-    onWeek: handleWeek,
+    onTime: handleTime,
     onScene: handleScene,
+    onSceneLogsChanged: () => {
+      if (sceneLogOpen) void refreshSceneLog();
+    },
+    onSayDraft: (content) => {
+      setPolishingSay(false);
+      setSayDraft(content);
+      showToast("AI 已把改写填进输入框");
+    },
+    onGodReply: (content) => {
+      showToast(content || "上帝已回应");
+    },
   });
 
   // Load room metadata for header.
   useEffect(() => {
     let active = true;
-    api
-      .listRooms()
-      .then((rooms) => {
+    refreshRoom()
+      .then(() => {
         if (!active) return;
-        const found =
-          rooms.find((r) => String(r.id) === String(roomId)) ?? null;
-        setRoom(found);
-        if (found?.week) setWeek(found.week);
-        if (found?.current_scene) setScene(found.current_scene);
-        if (!found) setLoadError("未找到房间，或你不在其中。");
       })
       .catch((err) => {
         if (active)
@@ -175,20 +233,12 @@ export function RoomPage() {
     return () => {
       active = false;
     };
-  }, [roomId]);
+  }, [refreshRoom]);
 
   // Load cards once on mount (panel refreshes again on open / after mutations).
   useEffect(() => {
     void refreshCards();
   }, [refreshCards]);
-
-  // 已知场景：当前场景 + 所有 NPC 的 scene 标签（去重）。
-  const knownScenes = useMemo(() => {
-    const set = new Set<string>();
-    if (scene) set.add(scene);
-    for (const n of cards?.npcs ?? []) if (n.scene) set.add(n.scene);
-    return [...set];
-  }, [scene, cards]);
 
   // ---- avatar resolver ----------------------------------------------------
   // player msg (author_type 'user'): match author_user_id -> MemberCard.avatar_url
@@ -200,9 +250,22 @@ export function RoomPage() {
   }, [cards]);
 
   const npcByName = useMemo(() => {
-    const m = new Map<string, { voice_id?: string | null; avatar_url?: string | null }>();
+    const m = new Map<
+      string,
+      {
+        voice_id?: string | null;
+        voice_ref_url?: string | null;
+        voice_ref_text?: string | null;
+        avatar_url?: string | null;
+      }
+    >();
     for (const n of cards?.npcs ?? [])
-      m.set(n.name, { voice_id: n.voice_id, avatar_url: n.avatar_url });
+      m.set(n.name, {
+        voice_id: n.voice_id,
+        voice_ref_url: n.voice_ref_url,
+        voice_ref_text: n.voice_ref_text,
+        avatar_url: n.avatar_url,
+      });
     return m;
   }, [cards]);
 
@@ -213,10 +276,24 @@ export function RoomPage() {
       null,
     [cards, user?.id],
   );
-  // Seed my stat sheet from the lifted card. WS "stats" events take over after
-  // the first beat; only seed when we don't already hold live stats.
+  const sceneLogScenes = sceneLog?.scenes.length
+    ? sceneLog.scenes
+    : scene
+      ? [scene]
+      : ["自由场景"];
+  const activeScene =
+    selectedScene || sceneLog?.current_scene || scene || "自由场景";
+  const activeSceneEntries = sceneLog?.logs[activeScene] ?? [];
+  useLayoutEffect(() => {
+    if (!sceneLogOpen) return;
+    const el = sceneLogEntriesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [sceneLogOpen, activeScene, activeSceneEntries.length, sceneLogLoading]);
+  // Keep my stat sheet aligned with the persisted card. This matters when
+  // re-selecting a character resets the sheet before the next WS stat event.
   useEffect(() => {
-    if (myCard?.stats) setMyStats((prev) => prev ?? myCard.stats ?? null);
+    if (myCard) setMyStats(myCard.stats ?? null);
   }, [myCard]);
 
   useEffect(
@@ -229,10 +306,12 @@ export function RoomPage() {
   // Force in-room character selection when cards have loaded and my card has
   // no persona set yet. Dismissible; never blocks the room if skipped.
   const needsCharSelect =
-    !charSelectDismissed && myCard !== null && !myCard.persona;
+    charSelectForced ||
+    (!charSelectDismissed && myCard !== null && !myCard.persona);
 
   const dismissCharSelect = useCallback(async () => {
     setCharSelectDismissed(true);
+    setCharSelectForced(false);
     await refreshCards();
   }, [refreshCards]);
 
@@ -274,6 +353,7 @@ export function RoomPage() {
           kind: "profile",
           profile: {
             kind: "npc",
+            id: n.id,
             name: n.name,
             avatarUrl: n.avatar_url,
             appearance: n.appearance,
@@ -302,24 +382,6 @@ export function RoomPage() {
     const el = timelineRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming]);
-
-  // Auto-mode: when on, advance shortly after my own message lands (minimal logic).
-  const lastSeenSeq = useRef(0);
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.seq <= lastSeenSeq.current) return;
-    lastSeenSeq.current = last.seq;
-    if (
-      autoMode &&
-      !aiBusy &&
-      last.author_type === "user" &&
-      last.author_user_id === user?.id
-    ) {
-      const t = window.setTimeout(() => advance(), 400);
-      return () => window.clearTimeout(t);
-    }
-  }, [messages, autoMode, aiBusy, advance, user?.id]);
 
   // ---- voice playback -----------------------------------------------------
   // Serialize TTS via one <audio>; cache by seq so a line is synthesized once.
@@ -350,7 +412,6 @@ export function RoomPage() {
   }, [ttsCacheKey]);
   const playQueueRef = useRef<string[]>([]);
   const playingRef = useRef(false);
-  const lastVoiceSeqRef = useRef(0);
 
   const drainQueue = useCallback(() => {
     if (playingRef.current) return;
@@ -378,19 +439,26 @@ export function RoomPage() {
   }, []);
 
   const enqueueVoice = useCallback(
-    async (msg: Message) => {
+    async (msg: Message, regenerate = false) => {
       const cached = ttsCacheRef.current.get(msg.seq);
-      if (cached) {
+      if (cached && !regenerate) {
         playQueueRef.current.push(cached);
         drainQueue();
         return;
       }
       const text = stripSpeakerPrefix(msg.content);
       if (!text) return;
-      const voiceId = npcByName.get(msg.speaker_label)?.voice_id ?? null;
+      const speaker = npcByName.get(msg.speaker_label);
       setVoicing(true);
       try {
-        const { url } = await api.tts(roomId, text, voiceId);
+        const { url } = await api.tts(
+          roomId,
+          text,
+          speaker?.voice_id ?? null,
+          speaker?.voice_ref_url ?? null,
+          speaker?.voice_ref_text ?? null,
+          regenerate,
+        );
         ttsCacheRef.current.set(msg.seq, url);
         persistTtsCache();
         playQueueRef.current.push(url);
@@ -404,26 +472,6 @@ export function RoomPage() {
     [roomId, npcByName, drainQueue, showToast, persistTtsCache],
   );
 
-  // When voice is ON, synthesize+play NEW NPC/AI lines (skip 旁白/system/player).
-  useEffect(() => {
-    if (!voiceOn || messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.seq <= lastVoiceSeqRef.current) return;
-    lastVoiceSeqRef.current = last.seq;
-    if (last.author_type !== "ai") return;
-    const label = last.speaker_label?.trim();
-    if (!label || label === "旁白" || label === "NPC") return;
-    if (!npcByName.has(label)) return; // only voice known NPCs
-    void enqueueVoice(last);
-  }, [messages, voiceOn, npcByName, enqueueVoice]);
-
-  // Keep the voice cursor at the latest seq when toggled on, so we don't
-  // suddenly synthesize backlog.
-  useEffect(() => {
-    if (voiceOn && messages.length)
-      lastVoiceSeqRef.current = messages[messages.length - 1].seq;
-  }, [voiceOn]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
@@ -433,6 +481,32 @@ export function RoomPage() {
   function memberOnline(userId: string): boolean {
     return presence.get(userId) ?? false;
   }
+
+  const sendPlayerText = useCallback(
+    (text: string) => {
+      setSayDraft(null);
+      say(text);
+    },
+    [say],
+  );
+  const polishPlayerText = useCallback(
+    (text: string) => {
+      setPolishingSay(true);
+      polishSay(text);
+    },
+    [polishSay],
+  );
+  const submitSceneMove = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const dest = sceneMoveText.trim();
+      if (!dest) return;
+      gotoScene(dest);
+      setSelectedScene(dest);
+      setSceneMoveText("");
+    },
+    [gotoScene, sceneMoveText],
+  );
 
   if (loadError) {
     return (
@@ -459,59 +533,27 @@ export function RoomPage() {
             ←
           </button>
           <h2>{room?.name ?? "房间"}</h2>
-          <span className="week-chip" title="叙事时间（每满 4 周月末结算）">
-            🗓 第{week}周
+          <span
+            className="week-chip"
+            title="当前世界时间"
+          >
+            🗓 {timeLabel}
           </span>
-          {scene && (
-            <div className="scene-ctrl">
-              <button
-                className="week-chip scene-chip"
-                onClick={() => setSceneMoveOpen((o) => !o)}
-                title="移动到其它场景"
-              >
-                📍 {scene} ▾
-              </button>
-              {sceneMoveOpen && (
-                <div className="scene-pop">
-                  {knownScenes
-                    .filter((s) => s !== scene)
-                    .map((s) => (
-                      <button
-                        key={s}
-                        className="scene-opt"
-                        disabled={aiBusy}
-                        onClick={() => gotoScene(s)}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  <div className="scene-new">
-                    <input
-                      value={sceneDraft}
-                      onChange={(e) => setSceneDraft(e.target.value)}
-                      placeholder="去新地点…"
-                      maxLength={64}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && sceneDraft.trim()) {
-                          gotoScene(sceneDraft);
-                          setSceneDraft("");
-                        }
-                      }}
-                    />
-                    <button
-                      disabled={aiBusy || !sceneDraft.trim()}
-                      onClick={() => {
-                        gotoScene(sceneDraft);
-                        setSceneDraft("");
-                      }}
-                    >
-                      前往
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <button
+            className="week-chip scene-chip"
+            onClick={openSceneLog}
+            title="打开当前场景与其他已知场景的记录"
+          >
+            📍 当前：{scene || "自由场景"}
+          </button>
+          <button
+            className="week-chip scene-chip"
+            onClick={() => describeScene()}
+            disabled={aiBusy || status !== "open"}
+            title="让旁白盘点当前场景里玩家与 NPC 的状态"
+          >
+            🧭 场景状态
+          </button>
           <span className={`status`}>
             <span className={`dot ${status}`} />
             {status === "open"
@@ -521,16 +563,14 @@ export function RoomPage() {
                 : "已断开"}
           </span>
           <button
-            className={`btn btn-ghost voice-toggle ${voiceOn ? "active" : ""}`}
-            onClick={() => setVoiceOn((v) => !v)}
-            aria-pressed={voiceOn}
-            title={voiceOn ? "关闭 NPC 语音播放" : "开启 NPC 语音播放"}
-          >
-            {voiceOn ? "🔊" : "🔇"}
-          </button>
-          <button
             className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
-            onClick={() => setPanelOpen((v) => !v)}
+            onClick={() => {
+              setPanelOpen((v) => {
+                const next = !v;
+                if (next) setStatsOpen(false);
+                return next;
+              });
+            }}
             aria-pressed={panelOpen}
             title="角色卡与登场 NPC"
           >
@@ -538,7 +578,13 @@ export function RoomPage() {
           </button>
           <button
             className={`btn btn-ghost cards-toggle ${statsOpen ? "active" : ""}`}
-            onClick={() => setStatsOpen((v) => !v)}
+            onClick={() => {
+              setStatsOpen((v) => {
+                const next = !v;
+                if (next) setPanelOpen(false);
+                return next;
+              });
+            }}
             aria-pressed={statsOpen}
             title="我的角色状态（女骑士模拟器式数值表）"
           >
@@ -559,16 +605,6 @@ export function RoomPage() {
             ))}
             <span className="chip ai">NPC · AI</span>
           </div>
-
-          <label className="toggle" style={{ marginLeft: "auto" }}>
-            <span>自动</span>
-            <span
-              className={`switch ${autoMode ? "on" : ""}`}
-              onClick={() => setAutoMode((v) => !v)}
-              role="switch"
-              aria-checked={autoMode}
-            />
-          </label>
         </div>
       </header>
 
@@ -584,7 +620,9 @@ export function RoomPage() {
             isMe={m.author_type === "user" && m.author_user_id === user?.id}
             avatarUrl={resolveAvatar(m)}
             onPlayVoice={
-              m.author_type === "ai" && npcByName.has(m.speaker_label)
+              VOICE_GENERATION_ENABLED &&
+              m.author_type === "ai" &&
+              npcByName.has(m.speaker_label)
                 ? () => void enqueueVoice(m)
                 : undefined
             }
@@ -602,7 +640,7 @@ export function RoomPage() {
             message={{
               author_type: "ai",
               author_user_id: null,
-              speaker_label: "NPC",
+              speaker_label: streaming.speaker_label ?? "NPC",
               content: streaming.content,
             }}
             isMe={false}
@@ -610,7 +648,7 @@ export function RoomPage() {
           />
         )}
 
-        {voicing && (
+        {VOICE_GENERATION_ENABLED && voicing && (
           <div className="streaming-hint voice-hint">
             <span className="pulse" />
             🔊 配音中…
@@ -620,11 +658,11 @@ export function RoomPage() {
         {aiBusy && (
           <div className="streaming-hint">
             <span className="pulse" />
-            AI 接话中…
+            剧情推进中…
           </div>
         )}
 
-        {imaging && (
+        {MEDIA_GENERATION_ENABLED && imaging && (
           <div className="streaming-hint">
             <span className="pulse" />
             生成场景图中…（约 30–60 秒）
@@ -634,55 +672,30 @@ export function RoomPage() {
 
       <div className="composer">
         <Composer
-          onSend={say}
+          onSend={sendPlayerText}
+          onPolish={polishPlayerText}
           onTyping={setTyping}
           disabled={status !== "open"}
+          polishing={polishingSay}
+          draftText={sayDraft}
         />
-        <button
-          className="btn btn-primary advance-btn"
-          onClick={() => advance()}
-          disabled={aiBusy || status !== "open"}
-        >
-          {aiBusy ? (
-            <>
-              <span className="spinner" />
-              AI 接话中…
-            </>
-          ) : (
-            "让 AI 接话"
-          )}
-        </button>
-        <button
-          className="btn"
-          onClick={() => timeskip()}
-          disabled={aiBusy || status !== "open"}
-          title="推进剧情时间：跳过一段时间，NPC 各自行动、世界演进"
-        >
-          ⏩ 推进时间
-        </button>
-        <button
-          className="btn"
-          onClick={() => requestImage(nsfw)}
-          disabled={imaging || status !== "open"}
-          title="根据当前剧情生成一张场景图"
-        >
-          {imaging ? (
-            <>
-              <span className="spinner" />
-              生成图中…
-            </>
-          ) : (
-            "🎨 生成图"
-          )}
-        </button>
-        <label className="toggle" title="生成 R18 图">
-          <input
-            type="checkbox"
-            checked={nsfw}
-            onChange={(e) => setNsfw(e.target.checked)}
-          />
-          <span>R18</span>
-        </label>
+        {MEDIA_GENERATION_ENABLED && (
+          <button
+            className="btn"
+            onClick={() => requestImage()}
+            disabled={imaging || status !== "open"}
+            title="根据当前场景生成图；R18 场景会自动生成 R18 图"
+          >
+            {imaging ? (
+              <>
+                <span className="spinner" />
+                生成图中…
+              </>
+            ) : (
+              "🎬 场景图"
+            )}
+          </button>
+        )}
       </div>
 
       <CardPanel
@@ -694,8 +707,14 @@ export function RoomPage() {
         onError={showToast}
         cards={cards}
         onRefresh={refreshCards}
+        onOpenProfile={(profile) => setOverlay({ kind: "profile", profile })}
+        onOpenCharacterSelect={() => setCharSelectForced(true)}
         onNpcSpeak={(npcId) => {
           advance(npcId);
+          setPanelOpen(false);
+        }}
+        onGodWhisper={(text) => {
+          godWhisper(text);
           setPanelOpen(false);
         }}
       />
@@ -707,6 +726,92 @@ export function RoomPage() {
         characterName={myCard?.character_name}
       />
 
+      {sceneLogOpen && (
+        <div
+          className="overlay-backdrop scene-log-overlay"
+          onClick={() => setSceneLogOpen(false)}
+        >
+          <div className="scene-log-card" onClick={(e) => e.stopPropagation()}>
+            <div className="scene-log-head">
+              <div>
+                <h3>场景记录</h3>
+                <p>{timeLabel}</p>
+              </div>
+              <div className="scene-log-actions">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => void refreshSceneLog()}
+                  disabled={sceneLogLoading}
+                >
+                  刷新
+                </button>
+                <button
+                  className="pf-close"
+                  onClick={() => setSceneLogOpen(false)}
+                  aria-label="关闭"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <form className="scene-move-form" onSubmit={submitSceneMove}>
+              <input
+                value={sceneMoveText}
+                onChange={(e) => setSceneMoveText(e.target.value)}
+                placeholder="输入想去的场景"
+                maxLength={64}
+                disabled={aiBusy || status !== "open"}
+              />
+              <button
+                className="btn btn-sm"
+                type="submit"
+                disabled={aiBusy || status !== "open" || !sceneMoveText.trim()}
+              >
+                移动
+              </button>
+            </form>
+            <div className="scene-log-body">
+              <div className="scene-log-list">
+                {sceneLogScenes.map((s) => (
+                  <button
+                    key={s}
+                    className={`scene-log-tab ${s === activeScene ? "active" : ""}`}
+                    onClick={() => setSelectedScene(s)}
+                  >
+                    <span>{s}</span>
+                    {s === sceneLog?.current_scene && <em>当前</em>}
+                  </button>
+                ))}
+              </div>
+              <div className="scene-log-entries" ref={sceneLogEntriesRef}>
+                <div className="scene-log-title">
+                  <strong>{activeScene}</strong>
+                  {sceneLogLoading && <span>加载中…</span>}
+                </div>
+                {activeSceneEntries.length > 0 ? (
+                  activeSceneEntries.map((entry, idx) => (
+                    <div
+                      key={`${entry.time_label}-${idx}`}
+                      className={`scene-log-entry kind-${entry.kind}`}
+                    >
+                      <div className="scene-log-meta">
+                        <span>{entry.time_label}</span>
+                        <b>{entry.speaker_label}</b>
+                      </div>
+                      <div className="scene-log-text">{entry.content}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="scene-log-empty">
+                    这个场景还没有记录。NPC 会随着玩家发言在各自场景持续行动。
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {needsCharSelect && (
         <CharacterSelect roomId={roomId} onDone={dismissCharSelect} />
       )}
@@ -715,6 +820,11 @@ export function RoomPage() {
         <ProfileModal
           profile={overlay.profile}
           onClose={() => setOverlay(null)}
+          onPayNpc={(npcId, amount) => payNpc(npcId, amount)}
+          currentMoney={
+            typeof myStats?.金钱 === "number" ? myStats.金钱 : null
+          }
+          paymentBusy={aiBusy}
         />
       )}
       {overlay?.kind === "image" && (

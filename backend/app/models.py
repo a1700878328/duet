@@ -43,14 +43,14 @@ class Room(Base):
     world_card: Mapped[str | None] = mapped_column(
         String(32), nullable=True, default=None
     )
-    # 叙事时间：第 N 周（非真实时间）；timeskip 推进，每满 4 周月末结算。
+    # 叙事时间：第 N 周 + 第 N 天 + 一天内的时间节点。
     week: Mapped[int] = mapped_column(default=1)
+    day: Mapped[int] = mapped_column(default=1)
+    time_slot: Mapped[int] = mapped_column(default=0)
     # 当前场景标签（""=无场景分区/自由世界）。导演只调当前场景的 NPC。
     current_scene: Mapped[str] = mapped_column(String(64), default="")
     # 场景元数据 JSON：{场景名: 上次离开时的周数}，用于回切补叙。
-    scenes_meta: Mapped[str | None] = mapped_column(
-        Text, nullable=True, default=None
-    )
+    scenes_meta: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     members: Mapped[list["RoomMember"]] = relationship(
@@ -61,12 +61,8 @@ class Room(Base):
 class RoomMember(Base):
     __tablename__ = "room_members"
 
-    room_id: Mapped[int] = mapped_column(
-        ForeignKey("rooms.id"), primary_key=True
-    )
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), primary_key=True
-    )
+    room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     character_name: Mapped[str] = mapped_column(String(128))
     # 外貌卡：自然语言外貌（发色/瞳色/服装…），生图时织入 prompt 保一致。None=不指定。
     appearance: Mapped[str | None] = mapped_column(
@@ -75,7 +71,13 @@ class RoomMember(Base):
     # 角色卡升级：性格/说话风格/背景（喂提示词），声音（per-玩家 TTS）。
     persona: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     voice_id: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, default=None
+        String(200), nullable=True, default=None
+    )
+    voice_ref_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
+    voice_ref_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     # 游戏层属性表（JSON 字符串：等级/经验/淫乱/各开发/状态/好感度…）。None=用默认表。
     stats: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
@@ -89,6 +91,40 @@ class RoomMember(Base):
     user: Mapped["User"] = relationship(lazy="selectin")
 
 
+class UserCharacterCard(Base):
+    """Account-level player character card library, reusable across rooms."""
+
+    __tablename__ = "user_character_cards"
+    __table_args__ = (Index("ix_user_character_card_owner", "owner_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    persona: Mapped[str] = mapped_column(Text, default="")
+    appearance: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None
+    )
+    voice_id: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, default=None
+    )
+    voice_ref_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
+    voice_ref_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
+    source_world_card: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    owner: Mapped["User"] = relationship(lazy="selectin")
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
@@ -97,9 +133,7 @@ class Message(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    room_id: Mapped[int] = mapped_column(
-        ForeignKey("rooms.id"), index=True
-    )
+    room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"), index=True)
     seq: Mapped[int] = mapped_column(Integer)
     author_type: Mapped[str] = mapped_column(String(16))  # user | ai | system | image
     author_user_id: Mapped[int | None] = mapped_column(
@@ -124,7 +158,13 @@ class NpcCard(Base):
         String(512), nullable=True, default=None
     )
     voice_id: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, default=None
+        String(200), nullable=True, default=None
+    )
+    voice_ref_url: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
+    voice_ref_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
     avatar_url: Mapped[str | None] = mapped_column(
@@ -133,13 +173,9 @@ class NpcCard(Base):
     # active=False 表示该 NPC 已被关闭/退出实时模拟（director 据此过滤）。
     active: Mapped[bool] = mapped_column(default=True)
     # 所属场景标签（None=随队/无所不在，任何场景都在场）。
-    scene: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, default=None
-    )
+    scene: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     # 玩家逐渐了解到的信息：随剧情累积刷新（区别于作者设定的 persona）。
-    discovered: Mapped[str | None] = mapped_column(
-        Text, nullable=True, default=None
-    )
+    discovered: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )

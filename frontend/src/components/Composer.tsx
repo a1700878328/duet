@@ -1,5 +1,6 @@
 import {
   useRef,
+  useEffect,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
@@ -7,11 +8,21 @@ import {
 
 interface Props {
   onSend: (text: string) => void;
+  onPolish?: (text: string) => void;
   onTyping?: (isTyping: boolean) => void;
   disabled?: boolean;
+  polishing?: boolean;
+  draftText?: string | null;
 }
 
-export function Composer({ onSend, onTyping, disabled = false }: Props) {
+export function Composer({
+  onSend,
+  onPolish,
+  onTyping,
+  disabled = false,
+  polishing = false,
+  draftText,
+}: Props) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -46,6 +57,13 @@ export function Composer({ onSend, onTyping, disabled = false }: Props) {
     autosize();
   }
 
+  useEffect(() => {
+    if (draftText === null || draftText === undefined) return;
+    setText(draftText);
+    onTyping?.(draftText.length > 0);
+    requestAnimationFrame(autosize);
+  }, [draftText]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="composer-row">
       <textarea
@@ -63,6 +81,23 @@ export function Composer({ onSend, onTyping, disabled = false }: Props) {
       >
         发送
       </button>
+      {onPolish && (
+        <button
+          className="btn btn-ghost polish-btn"
+          onClick={() => onPolish(text)}
+          disabled={disabled || polishing || !text.trim()}
+          title="让 AI 按你的角色卡改写到输入框，不会自动发送"
+        >
+          {polishing ? (
+            <>
+              <span className="spinner spinner-dark" />
+              改写中…
+            </>
+          ) : (
+            "AI 改写"
+          )}
+        </button>
+      )}
     </div>
   );
 }

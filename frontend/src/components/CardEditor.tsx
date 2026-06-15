@@ -83,12 +83,12 @@ export function CardEditor({
         />
       </div>
       <div className="field">
-        <label>音色 voice_id（可选）</label>
+        <label>角色语音（可选）</label>
         <input
           className="input"
           value={draft.voice_id}
           onChange={(e) => patch("voice_id", e.target.value)}
-          placeholder="voice id"
+          placeholder="Eleven voice id，或如：成熟女性，低沉威严"
         />
       </div>
       <div className="card-editor-actions">

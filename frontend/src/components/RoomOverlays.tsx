@@ -1,9 +1,11 @@
+import { useState, type FormEvent } from "react";
 import { assetUrl } from "../lib/api";
 import type { CharStats } from "../lib/types";
 
 // A resolved profile for the avatar popover — player (with stats) or NPC.
 export interface ProfileView {
   kind: "player" | "npc";
+  id?: number;
   name: string;
   avatarUrl?: string | null;
   appearance?: string | null;
@@ -18,7 +20,12 @@ const KEY_STATS: string[] = [
   "职业",
   "冒险者等级",
   "等级",
+  "经验",
   "金钱",
+  "力量",
+  "敏捷",
+  "智力",
+  "意志",
   "淫乱",
   "欲望",
 ];
@@ -54,18 +61,49 @@ function Backdrop({
 export function ProfileModal({
   profile,
   onClose,
+  onPayNpc,
+  currentMoney,
+  paymentBusy,
 }: {
   profile: ProfileView;
   onClose: () => void;
+  onPayNpc?: (npcId: number, amount: number) => void;
+  currentMoney?: number | null;
+  paymentBusy?: boolean;
 }) {
+  const [payAmount, setPayAmount] = useState("");
   const stats = profile.stats ?? null;
-  const states: string[] = Array.isArray(stats?.["状态"])
-    ? (stats!["状态"] as string[])
+  const rawStates = Array.isArray(stats?.["状态"]) ? stats!["状态"] : [];
+  const states: string[] = rawStates.length > 0
+    ? rawStates.map((s: any) => (typeof s === "object" ? s.name || s.id : String(s)))
+    : [];
+  const items: string[] = Array.isArray(stats?.["物品"])
+    ? (stats!["物品"] as string[])
     : [];
   const fav =
     stats && typeof stats["好感度"] === "object" && stats["好感度"]
       ? (stats["好感度"] as Record<string, number>)
       : {};
+  const amount = Number.parseInt(payAmount, 10);
+  const validAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+  const lacksMoney =
+    profile.kind === "npc" &&
+    currentMoney !== null &&
+    currentMoney !== undefined &&
+    validAmount > currentMoney;
+  const canPay =
+    profile.kind === "npc" &&
+    profile.id !== undefined &&
+    Boolean(onPayNpc) &&
+    validAmount > 0 &&
+    !lacksMoney &&
+    !paymentBusy;
+  function submitPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canPay || profile.id === undefined) return;
+    onPayNpc?.(profile.id, validAmount);
+    setPayAmount("");
+  }
 
   return (
     <Backdrop onClose={onClose} className="profile">
@@ -109,6 +147,31 @@ export function ProfileModal({
           </div>
         )}
 
+        {profile.kind === "npc" && profile.id !== undefined && onPayNpc && (
+          <form className="pf-pay" onSubmit={submitPayment}>
+            <div className="pf-label">支付</div>
+            <div className="pf-pay-row">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                placeholder="金额"
+                disabled={paymentBusy}
+              />
+              <button className="btn btn-sm" type="submit" disabled={!canPay}>
+                支付
+              </button>
+            </div>
+            <div className={`pf-pay-hint ${lacksMoney ? "warn" : ""}`}>
+              当前金钱：{currentMoney ?? "?"}
+              {lacksMoney ? `，不足支付 ${validAmount}` : ""}
+            </div>
+          </form>
+        )}
+
         {profile.kind === "player" && stats && (
           <div className="pf-section">
             <div className="pf-label">状态属性</div>
@@ -122,6 +185,15 @@ export function ProfileModal({
                 {states.map((s) => (
                   <span key={s} className="pf-tag">
                     ⛓ {s}
+                  </span>
+                ))}
+              </div>
+            )}
+            {items.length > 0 && (
+              <div className="pf-tags">
+                {items.map((item, idx) => (
+                  <span key={`${item}-${idx}`} className="pf-tag item">
+                    {item}
                   </span>
                 ))}
               </div>

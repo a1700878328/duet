@@ -28,17 +28,23 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {
         "world_card": "VARCHAR(32)",
         "week": "INTEGER DEFAULT 1",
+        "day": "INTEGER DEFAULT 1",
+        "time_slot": "INTEGER DEFAULT 0",
         "current_scene": "VARCHAR(64) DEFAULT ''",
         "scenes_meta": "TEXT",
     },
     "room_members": {
         "appearance": "VARCHAR(512)",
         "persona": "TEXT",
-        "voice_id": "VARCHAR(64)",
+        "voice_id": "VARCHAR(200)",
+        "voice_ref_url": "VARCHAR(256)",
+        "voice_ref_text": "TEXT",
         "avatar_url": "VARCHAR(256)",
         "stats": "TEXT",
     },
     "npc_cards": {
+        "voice_ref_url": "VARCHAR(256)",
+        "voice_ref_text": "TEXT",
         "avatar_url": "VARCHAR(256)",
         "active": "BOOLEAN DEFAULT 1",
         "scene": "VARCHAR(64)",
@@ -56,9 +62,7 @@ def _apply_additive_migrations(sync_conn) -> None:
         have = {c["name"] for c in insp.get_columns(table)}
         for col, ddl in cols.items():
             if col not in have:
-                sync_conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"
-                )
+                sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 async def init_db() -> None:

@@ -59,8 +59,9 @@ export function MessageBubble({
   const { author_type, speaker_label, content } = message;
 
   if (author_type === "system") {
+    const isNpcMind = content.startsWith("🧠 NPC内心");
     return (
-      <div className="bubble-row system">
+      <div className={`bubble-row system${isNpcMind ? " npc-mind" : ""}`}>
         <div className="bubble">{content}</div>
       </div>
     );
@@ -112,7 +113,11 @@ export function MessageBubble({
         {!isMe && (
           <div className="speaker">
             {speaker_label || (isAi ? "NPC" : "对方")}
-            {isAi && <span className="tag">NPC / 旁白</span>}
+            {isAi && (
+              <span className="tag">
+                {speaker_label === "旁白" ? "旁白" : "NPC"}
+              </span>
+            )}
             {onPlayVoice && (
               <button
                 type="button"

@@ -11,12 +11,15 @@ and LLLite branches stripped — v1 is the reliable core only):
 
     AnimaBoosterLoader(anima-base-v1.0)            -> MODEL
       -> ModelSamplingAuraFlow(shift=3.0)          -> MODEL
-      -> LoraLoaderModelOnly(anima-turbo @0.8)     -> MODEL ─┐
+      -> LoraLoaderModelOnly(anima-turbo @0.8)
+      -> LoraLoaderModelOnly(ntrmix style @1.0)    -> MODEL ─┐
     CLIPLoader(qwen_3_06b_base, stable_diffusion)  -> CLIP   │
       -> CLIPTextEncode(positive)                  -> COND   │
       -> CLIPTextEncode(negative)                  -> COND   │
     AnimaLatentImage(width,height)                 -> LATENT │
-      -> KSampler(steps=18,cfg=1.15,er_sde,beta57) <─────────┘
+      -> KSampler(steps=12,cfg=1,er_sde,beta57)    <─────────┘
+      -> VAEDecode(qwen_image_vae)                 -> IMAGE
+      -> VAEEncode -> KSampler(6,cfg=1,euler,kl_optimal,denoise=.45)
       -> VAEDecode(qwen_image_vae)                 -> IMAGE
       -> SaveImage
 
@@ -25,25 +28,31 @@ Node quirks worth knowing:
   are loaded separately, unlike CheckpointLoaderSimple in the SDXL path.
 - CLIP is a Qwen3-0.6B text encoder loaded via CLIPLoader with type
   "stable_diffusion" (the Anima build registers it under that type).
-- AuraFlow/DiT wants **low CFG**: turbo LoRA + cfg≈1.15, sampler er_sde,
-  scheduler beta57, 18 steps (proven values from the reference workflow).
+- AuraFlow/DiT wants **low CFG**: turbo LoRA + cfg=1, sampler er_sde,
+  scheduler beta57, then a low-denoise second pass (豹豹喵呜 reference).
 - ModelSamplingAuraFlow shift=3.0 (reference value; node default is 1.73).
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
+import json
 import random
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from . import media
 from .client import ensure_comfyui
 from .config import COMFY_URL
+
+MEDIA_DIR = media.MEDIA_DIR
+MEDIA_URL_PREFIX = media.MEDIA_URL_PREFIX
+save_png = media.save_png
 
 
 def char_seed(room_id: int, name: str) -> int:
@@ -59,18 +68,32 @@ Graph = dict[str, dict[str, Any]]
 
 # === Anima model files (verified present via /object_info) ===
 ANIMA_MODEL = "anima-base-v1.0.safetensors"
-ANIMA_TURBO_LORA = "anima-turbo-lora-v0.1.safetensors"
+ANIMA_TURBO_LORA = "anima-turbo-lora-v0.2.safetensors"
+ANIMA_NTRMIX_LORA = "ntrmix_style_anima_b1_v1.safetensors"
+ANIMA_NTRMIX_TRIGGER = "@ntrmixstyle"
 ANIMA_CLIP = "qwen_3_06b_base.safetensors"
 ANIMA_CLIP_TYPE = "stable_diffusion"
 ANIMA_VAE = "qwen_image_vae.safetensors"
+IPADAPTER_PLUS = "ip-adapter-plus_sdxl_vit-h.safetensors"
+IPADAPTER_CLIP_VISION = "clip_vision_h.safetensors"
 
-# === Sampler params (from the reference workflow's main KSampler, node 57) ===
-ANIMA_STEPS = 18
-ANIMA_CFG = 1.15
+# === Sampler params (high quality — 30 steps CFG 4, no turbo by default) ===
+ANIMA_STEPS = 30
+ANIMA_CFG = 4.0
 ANIMA_SAMPLER = "er_sde"
 ANIMA_SCHEDULER = "beta57"
+ANIMA_REFINER_STEPS = 8
+ANIMA_REFINER_CFG = 4.0
+ANIMA_REFINER_SAMPLER = "euler"
+ANIMA_REFINER_SCHEDULER = "kl_optimal"
+ANIMA_REFINER_DENOISE = 0.4
 ANIMA_SHIFT = 3.0
-ANIMA_TURBO_STRENGTH = 0.8
+ANIMA_TURBO_STRENGTH = 0.0  # disabled by default
+ANIMA_NTRMIX_STRENGTH = 1.0
+# Upscale tile refine targets. Keep this aligned with the verified Anima/NTRMix
+# tutorial API prompt rather than pushing to an over-large long edge.
+ANIMA_UPSCALE_PRE_SIZE = 1024
+ANIMA_UPSCALE_TARGET = 1824
 
 # === Default sizes (multiples of 16, AuraFlow requirement) ===
 PORTRAIT_WIDTH = 832
@@ -80,12 +103,124 @@ LANDSCAPE_HEIGHT = 832
 
 # A light default negative; callers may extend it.
 DEFAULT_NEGATIVE = (
-    "worst quality, low quality, bad anatomy, bad hands, extra fingers, "
-    "missing fingers, watermark, text, signature, jpeg artifacts"
+    "score_1, score_2, score_3, bad anatomy, bad proportions, deformed anatomy, "
+    "deformed face, deformed eyes, bad hands, multiple fingers, missing fingers, "
+    "extra fingers, fewer digits, cropped, worst quality, low quality, lowres, "
+    "jpeg artifacts, watermark, username, signature, sketch, text, speech bubble, "
+    "caption, photorealistic, realistic, conjoined, "
+    "bad ai-generated, 3d render, cgi, semi-realistic, live action, western comic, "
+    "oil painting, painterly, plastic skin, shiny clothes, shiny skin, gold skin, "
+    "halo, three hands"
 )
 
-MEDIA_DIR = Path(__file__).resolve().parents[1] / "media" / "generated"
-MEDIA_URL_PREFIX = "/media/generated"
+BAOBAO_QUALITY_CORE = (
+    "best quality, score_9, score_8, score_7, highres, absurdres, 2D anime screenshot, "
+    "Japanese TV anime style, clean anime line art, polished cel shading, "
+    "flat anime coloring, crisp expressive eyes, official art"
+)
+BAOBAO_QUALITY_PREFIX = f"{ANIMA_NTRMIX_TRIGGER}, {BAOBAO_QUALITY_CORE}"
+ACTIVE_STRONG_WORKFLOWS = Path(
+    r"C:\Users\a1700\Documents\ComfyUI\user\default\workflows\Active_Strong"
+)
+ANIMA_NTRMIX_FACE_STYLE_API_PROMPT = (
+    ACTIVE_STRONG_WORKFLOWS
+    / "FINAL_Anima_NTRMix_FaceStyle_Single_UltraTile1824.api-prompt.txt"
+)
+
+
+def _remove_ntrmix_trigger(text: str) -> str:
+    return (
+        text.replace(f"{ANIMA_NTRMIX_TRIGGER},", "")
+        .replace(ANIMA_NTRMIX_TRIGGER, "")
+        .strip(" ,")
+    )
+
+
+def _with_anima_style_prefix(positive: str, *, use_ntrmix: bool = True) -> str:
+    """Ensure generated prompts carry the active Anima style trigger."""
+    text = positive.strip()
+    if not use_ntrmix:
+        text = _remove_ntrmix_trigger(text)
+    if "score_9" in text or "best quality" in text:
+        if ANIMA_NTRMIX_TRIGGER in text:
+            return text
+        if not use_ntrmix:
+            return text
+        return f"{ANIMA_NTRMIX_TRIGGER}, {text}"
+    prefix = BAOBAO_QUALITY_PREFIX if use_ntrmix else BAOBAO_QUALITY_CORE
+    return f"{prefix}, {text}" if text else prefix
+
+
+def _load_api_prompt_template(path: Path) -> Graph:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_original_ntrmix_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    width: int = PORTRAIT_WIDTH,
+    height: int = PORTRAIT_HEIGHT,
+    seed: int | None = None,
+    upscale: bool = False,
+    tile_refine: bool = True,
+    output_prefix: str = "DUET_ANIMA_NTRMIX_ORIGINAL",
+) -> Graph:
+    """Load the verified Anima/NTRMix API prompt and patch only runtime inputs."""
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    width = max(64, (width // 8) * 8)
+    height = max(64, (height // 8) * 8)
+    g = copy.deepcopy(_load_api_prompt_template(ANIMA_NTRMIX_FACE_STYLE_API_PROMPT))
+    g["54"]["inputs"]["text"] = _remove_ntrmix_trigger(positive)
+    if negative:
+        g["62"]["inputs"]["text"] = f"{g['62']['inputs']['text']}, {negative}"
+    g["159"]["inputs"]["自定义宽"] = width
+    g["159"]["inputs"]["自定义高"] = height
+    g["57"]["inputs"]["seed"] = seed
+    g["134"]["inputs"]["seed"] = seed + 1000000
+    g["180"]["inputs"]["filename_prefix"] = f"{output_prefix}_ULTRASHARP_PRE"
+    g["169"]["inputs"]["filename_prefix"] = f"{output_prefix}_REFINED"
+    if not upscale:
+        for node_id in (
+            "164",
+            "161",
+            "162",
+            "165",
+            "166",
+            "129",
+            "130",
+            "131",
+            "132",
+            "141",
+            "136",
+            "134",
+            "137",
+            "142",
+            "139",
+            "180",
+        ):
+            g.pop(node_id, None)
+        g["169"]["inputs"]["images"] = ["64", 0]
+        g["169"]["inputs"]["filename_prefix"] = output_prefix
+    elif not tile_refine:
+        for node_id in (
+            "166",
+            "129",
+            "130",
+            "131",
+            "132",
+            "141",
+            "136",
+            "134",
+            "137",
+            "142",
+            "139",
+        ):
+            g.pop(node_id, None)
+        g["169"]["inputs"]["images"] = ["165", 0]
+    return g
 
 
 def build_anima_workflow(
@@ -97,7 +232,14 @@ def build_anima_workflow(
     seed: int | None = None,
     steps: int = ANIMA_STEPS,
     cfg: float = ANIMA_CFG,
-    use_turbo: bool = True,
+    use_turbo: bool = False,
+    use_ntrmix: bool = True,
+    ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
+    reference_image: str | None = None,
+    ipadapter_weight: float = 0.42,
+    use_teacache: bool = True,
+    second_pass: bool = True,
+    upscale: bool = False,
     output_prefix: str = "DUET_ANIMA",
 ) -> Graph:
     """Build an API-format ComfyUI graph for the core Anima DiT generation chain.
@@ -113,6 +255,7 @@ def build_anima_workflow(
     width = max(64, (width // 16) * 16)
     height = max(64, (height // 16) * 16)
 
+    positive = _with_anima_style_prefix(positive, use_ntrmix=use_ntrmix)
     neg = DEFAULT_NEGATIVE if not negative else f"{DEFAULT_NEGATIVE}, {negative}"
 
     g: Graph = {
@@ -127,7 +270,10 @@ def build_anima_workflow(
         },
         "2": {
             "class_type": "ModelSamplingAuraFlow",
-            "inputs": {"model": ["1", 0], "shift": ANIMA_SHIFT},
+            "inputs": {
+                "model": ["16", 0] if use_teacache else ["1", 0],
+                "shift": ANIMA_SHIFT,
+            },
         },
         # --- Text encoder (separate from the booster loader) ---
         "4": {
@@ -170,6 +316,21 @@ def build_anima_workflow(
             "inputs": {"filename_prefix": output_prefix, "images": ["10", 0]},
         },
     }
+    if use_teacache:
+        g["16"] = {
+            "class_type": "AnimaTeaCache",
+            "inputs": {
+                "model": ["1", 0],
+                "threshold": 0.15,
+                "teacache_version": "v1 (Legacy Fast)",
+                "adaptive_mode": True,
+                "early_steps_factor": 0.4,
+                "late_steps_factor": 1.8,
+                "start_percent": 0.0,
+                "end_percent": 1.0,
+                "cache_device": "cuda",
+            },
+        }
 
     # Optional turbo LoRA (model-only — booster loader emits no CLIP).
     if use_turbo:
@@ -184,6 +345,47 @@ def build_anima_workflow(
         model_ref = ["3", 0]
     else:
         model_ref = ["2", 0]
+    if use_ntrmix:
+        g["23"] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": model_ref,
+                "lora_name": ANIMA_NTRMIX_LORA,
+                "strength_model": ntrmix_strength,
+            },
+        }
+        model_ref = ["23", 0]
+
+    sampler_model_ref = model_ref
+    if reference_image:
+        g["12"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": reference_image},
+        }
+        g["13"] = {
+            "class_type": "CLIPVisionLoader",
+            "inputs": {"clip_name": IPADAPTER_CLIP_VISION},
+        }
+        g["14"] = {
+            "class_type": "IPAdapterModelLoader",
+            "inputs": {"ipadapter_file": IPADAPTER_PLUS},
+        }
+        g["15"] = {
+            "class_type": "IPAdapterAdvanced",
+            "inputs": {
+                "model": model_ref,
+                "ipadapter": ["14", 0],
+                "image": ["12", 0],
+                "clip_vision": ["13", 0],
+                "weight": max(0.0, min(float(ipadapter_weight), 1.2)),
+                "weight_type": "style and composition",
+                "combine_embeds": "concat",
+                "start_at": 0.08,
+                "end_at": 0.72,
+                "embeds_scaling": "V only",
+            },
+        }
+        sampler_model_ref = ["15", 0]
 
     g["9"] = {
         "class_type": "KSampler",
@@ -194,21 +396,389 @@ def build_anima_workflow(
             "sampler_name": ANIMA_SAMPLER,
             "scheduler": ANIMA_SCHEDULER,
             "denoise": 1.0,
-            "model": model_ref,
+            "model": sampler_model_ref,
             "positive": ["5", 0],
             "negative": ["6", 0],
             "latent_image": ["8", 0],
         },
     }
+    final_image_ref: list[Any] = ["10", 0]
+    if second_pass:
+        g["17"] = {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["10", 0], "vae": ["7", 0]},
+        }
+        g["18"] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": ANIMA_REFINER_STEPS,
+                "cfg": ANIMA_REFINER_CFG,
+                "sampler_name": ANIMA_REFINER_SAMPLER,
+                "scheduler": ANIMA_REFINER_SCHEDULER,
+                "denoise": ANIMA_REFINER_DENOISE,
+                "model": model_ref,
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["17", 0],
+            },
+        }
+        g["19"] = {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["18", 0], "vae": ["7", 0]},
+        }
+        final_image_ref = ["19", 0]
+
+    if upscale:
+        g["20"] = {
+            "class_type": "UpscaleModelLoader",
+            "inputs": {"model_name": "4x-UltraSharp.pth"},
+        }
+        g["21"] = {
+            "class_type": "ImageUpscaleWithModel",
+            "inputs": {"upscale_model": ["20", 0], "image": final_image_ref},
+        }
+        g["22"] = {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["21", 0],
+                "upscale_method": "lanczos",
+                "width": width * 2,
+                "height": height * 2,
+                "crop": "disabled",
+            },
+        }
+        g["11"]["inputs"]["images"] = ["22", 0]
+    else:
+        g["11"]["inputs"]["images"] = final_image_ref
     return g
 
 
-def _save_png(image_bytes: bytes) -> tuple[str, Path]:
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.png"
-    path = MEDIA_DIR / name
-    path.write_bytes(image_bytes)
-    return name, path
+def build_baobao_anima_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    width: int = PORTRAIT_WIDTH,
+    height: int = PORTRAIT_HEIGHT,
+    seed: int | None = None,
+    reference_images: list[str] | None = None,
+    ipadapter_weight: float = 0.52,
+    use_ntrmix: bool = True,
+    ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
+    use_turbo: bool = False,
+    upscale: bool = False,
+    tile_refine: bool = True,
+    output_prefix: str = "DUET_ANIMA",
+) -> Graph:
+    """High-quality Anima DiT workflow — 30 steps, CFG 4, ntrmix LoRA, optional
+    4x-UltraSharp upscale with tile refine.
+
+    Multi-person is handled natively by the DiT: describe several characters in
+    the positive prompt. No region masks needed.
+
+    When ``use_turbo=False`` (default), the turbo LoRA is omitted and the ntrmix
+    style LoRA loads directly on the base model. When ``tile_refine=True`` and
+    ``upscale=True``, the upscaled image is split into tiles, each tile refined
+    via a second KSampler pass, then reassembled for maximum detail.
+    """
+    if use_ntrmix:
+        return build_original_ntrmix_workflow(
+            positive,
+            negative,
+            width=width,
+            height=height,
+            seed=seed,
+            upscale=upscale,
+            tile_refine=tile_refine,
+            output_prefix=output_prefix,
+        )
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    width = max(64, (width // 8) * 8)
+    height = max(64, (height // 8) * 8)
+    if not use_ntrmix:
+        positive = _remove_ntrmix_trigger(positive)
+    neg = DEFAULT_NEGATIVE if not negative else f"{DEFAULT_NEGATIVE}, {negative}"
+
+    refs = [r for r in (reference_images or []) if r][:2]
+    g: Graph = {
+        "55": {
+            "class_type": "AnimaBoosterLoader",
+            "inputs": {
+                "model_name": ANIMA_MODEL,
+                "sage_attention": "auto",
+                "torch_compile": False,
+            },
+        },
+        "56": {
+            "class_type": "AnimaTeaCache",
+            "inputs": {
+                "model": ["55", 0],
+                "threshold": 0.15,
+                "teacache_version": "v1 (Legacy Fast)",
+                "adaptive_mode": True,
+                "early_steps_factor": 0.4,
+                "late_steps_factor": 1.8,
+                "start_percent": 0.0,
+                "end_percent": 1.0,
+                "cache_device": "cuda",
+            },
+        },
+        "60": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["56", 0], "shift": 3},
+        },
+        # ntrmix LoRA (always on unless use_ntrmix=False)
+        "4": {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": ["60", 0] if not use_turbo else ["3", 0],
+                "lora_name": ANIMA_NTRMIX_LORA,
+                "strength_model": ntrmix_strength,
+            },
+        },
+        "58": {
+            "class_type": "CLIPLoader",
+            "inputs": {
+                "clip_name": ANIMA_CLIP,
+                "type": ANIMA_CLIP_TYPE,
+                "device": "default",
+            },
+        },
+        "59": {"class_type": "VAELoader", "inputs": {"vae_name": ANIMA_VAE}},
+        "69": {"class_type": "CR Text", "inputs": {"text": ""}},
+        "68": {
+            "class_type": "CR Text",
+            "inputs": {
+                "text": BAOBAO_QUALITY_PREFIX if use_ntrmix else BAOBAO_QUALITY_CORE
+            },
+        },
+        "54": {"class_type": "CR Text", "inputs": {"text": positive}},
+        "73": {
+            "class_type": "Text Concatenate",
+            "inputs": {
+                "text_a": ["69", 0],
+                "text_b": ["68", 0],
+                "text_c": ["54", 0],
+                "delimiter": ", ",
+                "clean_whitespace": "false",
+            },
+        },
+        "61": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["58", 0], "text": ["73", 0]},
+        },
+        "62": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["58", 0], "text": neg},
+        },
+        "159": {
+            "class_type": "WJILatentPreset",
+            "inputs": {
+                "预设分辨率": "自定义",
+                "横竖对调": False,
+                "批量大小": 1,
+                "自定义宽": width,
+                "自定义高": height,
+                "缩放倍数": "8",
+            },
+        },
+        "57": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["3", 0],
+                "positive": ["61", 0],
+                "negative": ["62", 0],
+                "latent_image": ["159", 0],
+                "seed": seed,
+                "steps": ANIMA_STEPS,
+                "cfg": ANIMA_CFG,
+                "sampler_name": ANIMA_SAMPLER,
+                "scheduler": ANIMA_SCHEDULER,
+                "denoise": 1.0,
+            },
+        },
+        "64": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["57", 0], "vae": ["59", 0]},
+        },
+        "168": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["64", 0], "filename_prefix": output_prefix},
+        },
+    }
+    base_model_ref: list[Any] = (
+        ["4", 0] if use_ntrmix else (["3", 0] if use_turbo else ["60", 0])
+    )
+    g["57"]["inputs"]["model"] = base_model_ref
+    if use_turbo:
+        g["3"] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": ["60", 0],
+                "lora_name": ANIMA_TURBO_LORA,
+                "strength_model": ANIMA_TURBO_STRENGTH,
+            },
+        }
+        g["4"]["inputs"]["model"] = ["3", 0]
+    if not use_ntrmix:
+        g.pop("4", None)
+    if refs:
+        g["200"] = {
+            "class_type": "CLIPVisionLoader",
+            "inputs": {"clip_name": IPADAPTER_CLIP_VISION},
+        }
+        g["201"] = {
+            "class_type": "IPAdapterModelLoader",
+            "inputs": {"ipadapter_file": IPADAPTER_PLUS},
+        }
+        model_ref = base_model_ref
+        for idx, image_name in enumerate(refs):
+            load_id = str(202 + idx * 2)
+            ipa_id = str(203 + idx * 2)
+            g[load_id] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
+            g[ipa_id] = {
+                "class_type": "IPAdapterAdvanced",
+                "inputs": {
+                    "model": model_ref,
+                    "ipadapter": ["201", 0],
+                    "image": [load_id, 0],
+                    "clip_vision": ["200", 0],
+                    "weight": max(0.0, min(float(ipadapter_weight), 1.2)),
+                    "weight_type": "style and composition",
+                    "combine_embeds": "concat",
+                    "start_at": 0.03,
+                    "end_at": 0.78,
+                    "embeds_scaling": "V only",
+                },
+            }
+            model_ref = [ipa_id, 0]
+        g["57"]["inputs"]["model"] = model_ref
+        model_ref_for_refine = model_ref
+    else:
+        model_ref_for_refine = base_model_ref
+
+    if upscale:
+        g["164"] = {
+            "class_type": "easy imageScaleDownToSize",
+            "inputs": {
+                "images": ["64", 0],
+                "size": ANIMA_UPSCALE_PRE_SIZE,
+                "mode": True,
+            },
+        }
+        g["161"] = {
+            "class_type": "UpscaleModelLoader",
+            "inputs": {"model_name": "4x-UltraSharp.pth"},
+        }
+        g["162"] = {
+            "class_type": "ImageUpscaleWithModel",
+            "inputs": {"upscale_model": ["161", 0], "image": ["164", 0]},
+        }
+        g["165"] = {
+            "class_type": "easy imageScaleDownToSize",
+            "inputs": {
+                "images": ["162", 0],
+                "size": ANIMA_UPSCALE_TARGET,
+                "mode": True,
+            },
+        }
+
+        if tile_refine:
+            # Tile refine: split upscaled image → VAEEncode each tile → KSampler
+            # refine → VAEDecode → assemble
+            g["166"] = {
+                "class_type": "GetImageSize",
+                "inputs": {"image": ["165", 0]},
+            }
+            g["129"] = {
+                "class_type": "MathExpression|pysssss",
+                "inputs": {
+                    "a": ["166", 0],
+                    "expression": "(a+1279)//1280+int(a%1280==0)",
+                },
+            }
+            g["130"] = {
+                "class_type": "MathExpression|pysssss",
+                "inputs": {
+                    "a": ["166", 1],
+                    "expression": "(a+1279)//1280+int(a%1280==0)",
+                },
+            }
+            g["131"] = {
+                "class_type": "TTP_Tile_image_size",
+                "inputs": {
+                    "image": ["165", 0],
+                    "width_factor": ["129", 0],
+                    "height_factor": ["130", 0],
+                    "overlap_rate": 0.2,
+                },
+            }
+            g["132"] = {
+                "class_type": "TTP_Image_Tile_Batch",
+                "inputs": {
+                    "image": ["165", 0],
+                    "tile_width": ["131", 0],
+                    "tile_height": ["131", 1],
+                },
+            }
+            g["141"] = {
+                "class_type": "easy imageBatchToImageList",
+                "inputs": {"image": ["132", 0]},
+            }
+            g["136"] = {
+                "class_type": "VAEEncode",
+                "inputs": {"pixels": ["141", 0], "vae": ["59", 0]},
+            }
+            g["134"] = {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed + 1000000,
+                    "steps": ANIMA_REFINER_STEPS,
+                    "cfg": ANIMA_REFINER_CFG,
+                    "sampler_name": ANIMA_REFINER_SAMPLER,
+                    "scheduler": ANIMA_REFINER_SCHEDULER,
+                    "denoise": ANIMA_REFINER_DENOISE,
+                    "model": model_ref_for_refine,
+                    "positive": ["61", 0],
+                    "negative": ["62", 0],
+                    "latent_image": ["136", 0],
+                },
+            }
+            g["137"] = {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["134", 0], "vae": ["59", 0]},
+            }
+            g["142"] = {
+                "class_type": "ImageListToBatch+",
+                "inputs": {"image": ["137", 0]},
+            }
+            g["139"] = {
+                "class_type": "TTP_Image_Assy",
+                "inputs": {
+                    "tiles": ["142", 0],
+                    "positions": ["132", 1],
+                    "original_size": ["132", 2],
+                    "grid_size": ["132", 3],
+                    "padding": 128,
+                },
+            }
+            g["169"] = {
+                "class_type": "SaveImage",
+                "inputs": {
+                    "images": ["139", 0],
+                    "filename_prefix": (
+                        f"{output_prefix}_TILE_REFINED_{ANIMA_UPSCALE_TARGET}"
+                    ),
+                },
+            }
+            g["168"]["inputs"]["images"] = ["165", 0]
+            g["168"]["inputs"]["filename_prefix"] = (
+                f"{output_prefix}_ULTRASHARP_PRE_{ANIMA_UPSCALE_TARGET}"
+            )
+        else:
+            g["168"]["inputs"]["images"] = ["165", 0]
+    return g
 
 
 async def _submit_and_fetch(
@@ -264,22 +834,33 @@ async def _submit_and_fetch(
             entry = h[prompt_id]
             status = entry.get("status", {}).get("status_str", "")
             if status == "success":
-                for out in entry.get("outputs", {}).values():
+                candidates: list[dict[str, Any]] = []
+                for node_id, out in entry.get("outputs", {}).items():
                     for img in out.get("images", []):
-                        img_r = await client.get(
-                            f"{COMFY_URL}/view",
-                            params={
-                                "filename": img["filename"],
-                                "type": img.get("type", "output"),
-                                "subfolder": img.get("subfolder", ""),
-                            },
-                            timeout=60,
-                        )
-                        return {
-                            "bytes": img_r.content,
+                        item = dict(img)
+                        item["_node_id"] = str(node_id)
+                        candidates.append(item)
+                candidates.sort(
+                    key=lambda img: (
+                        img.get("_node_id") != "169",
+                        "REFINED" not in str(img.get("filename", "")).upper(),
+                    )
+                )
+                for img in candidates:
+                    img_r = await client.get(
+                        f"{COMFY_URL}/view",
+                        params={
                             "filename": img["filename"],
-                            "prompt_id": prompt_id,
-                        }
+                            "type": img.get("type", "output"),
+                            "subfolder": img.get("subfolder", ""),
+                        },
+                        timeout=60,
+                    )
+                    return {
+                        "bytes": img_r.content,
+                        "filename": img["filename"],
+                        "prompt_id": prompt_id,
+                    }
                 return {"error": "成功但无输出图片", "prompt_id": prompt_id}
             if status == "error":
                 msgs = entry.get("status", {}).get("messages", [])
@@ -293,6 +874,32 @@ async def _submit_and_fetch(
         return {"error": "超时", "prompt_id": prompt_id}
 
 
+async def _upload_input_image(path: str) -> str | None:
+    """Upload a local reference image to ComfyUI's input folder.
+
+    LoadImage nodes can only read ComfyUI input files. Avatar images generated by
+    this app live under app/media/generated, so we copy them through the HTTP
+    upload endpoint and use the returned input filename in the workflow.
+    """
+    src = Path(path)
+    if not src.exists() or not src.is_file():
+        return None
+    name = f"duet_ref_{hashlib.sha1(str(src).encode()).hexdigest()[:12]}_{src.name}"
+    async with httpx.AsyncClient(timeout=60) as client:
+        try:
+            with src.open("rb") as f:
+                resp = await client.post(
+                    f"{COMFY_URL}/upload/image",
+                    data={"type": "input", "overwrite": "true"},
+                    files={"image": (name, f, "image/png")},
+                )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            return None
+    return data.get("name") or name
+
+
 async def generate_anima(
     positive: str,
     negative: str = "",
@@ -301,25 +908,53 @@ async def generate_anima(
     height: int = PORTRAIT_HEIGHT,
     seed: int | None = None,
     landscape: bool = False,
-    use_turbo: bool = True,
+    use_turbo: bool = False,
+    use_ntrmix: bool = True,
+    ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
+    reference_image_path: str | None = None,
+    reference_image_paths: list[str] | None = None,
+    ipadapter_weight: float = 0.42,
+    upscale: bool = False,
+    tile_refine: bool = True,
 ) -> dict[str, Any]:
     """Generate one Anima image. Multi-person = multiple chars in ``positive``.
 
     Returns {url, path, filename, prompt_id} on success or {error} on any failure.
     Never raises. Pass ``landscape=True`` for the 1216x832 multi-person default
     (good for 2-3 characters side by side), or set width/height explicitly.
+
+    Default is high quality: 30 steps, CFG 4, ntrmix LoRA only (no turbo),
+    with 4x-UltraSharp upscale and tile refine.
     """
     if landscape and width == PORTRAIT_WIDTH and height == PORTRAIT_HEIGHT:
         width, height = LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT
 
+    uploaded_refs: list[str] = []
+    ref_paths = list(reference_image_paths or [])
+    if reference_image_path:
+        ref_paths.insert(0, reference_image_path)
+    for ref_path in ref_paths[:2]:
+        try:
+            uploaded = await _upload_input_image(ref_path)
+        except Exception:
+            uploaded = None
+        if uploaded:
+            uploaded_refs.append(uploaded)
+
     try:
-        workflow = build_anima_workflow(
+        workflow = build_baobao_anima_workflow(
             positive,
             negative,
             width=width,
             height=height,
             seed=seed,
+            reference_images=uploaded_refs,
+            ipadapter_weight=ipadapter_weight,
+            use_ntrmix=use_ntrmix,
+            ntrmix_strength=ntrmix_strength,
             use_turbo=use_turbo,
+            upscale=upscale,
+            tile_refine=tile_refine,
         )
     except Exception as e:  # build is pure, but never raise out of the entrypoint
         return {"error": f"构图失败: {e}"}
@@ -332,7 +967,7 @@ async def generate_anima(
     if not image_bytes:
         return {"error": "成功但无图片字节"}
 
-    name, path = _save_png(image_bytes)
+    name, path = save_png(image_bytes)
     return {
         "url": f"{MEDIA_URL_PREFIX}/{name}",
         "path": str(path),

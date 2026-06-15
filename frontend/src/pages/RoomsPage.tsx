@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, lobbySocketUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Room } from "../lib/types";
 
 export function RoomsPage() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const navigate = useNavigate();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,21 +17,54 @@ export function RoomsPage() {
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       setRooms(await api.listRooms());
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载房间失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!token) return;
+    let closed = false;
+    let retryTimer: number | null = null;
+    let ws: WebSocket | null = null;
+
+    const connect = () => {
+      ws = new WebSocket(lobbySocketUrl(token));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as { type?: string };
+          if (payload.type === "rooms_changed") void load(false);
+        } catch {
+          /* ignore malformed lobby frame */
+        }
+      };
+      ws.onclose = () => {
+        if (closed) return;
+        retryTimer = window.setTimeout(connect, 1200);
+      };
+      ws.onerror = () => {
+        ws?.close();
+      };
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+      ws?.close();
+    };
+  }, [token, load]);
 
   async function createRoom(e: FormEvent) {
     e.preventDefault();
@@ -88,10 +121,29 @@ export function RoomsPage() {
     }
   }
 
+  async function enterRoom(room: Room) {
+    const isMember = room.members.some((m) => String(m.user_id) === String(user?.id));
+    if (isMember) {
+      navigate(`/rooms/${room.id}`);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const joined = await api.joinRoom(String(room.id), {
+        character_name: user?.display_name || "玩家",
+      });
+      navigate(`/rooms/${joined.id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加入失败");
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-head">
-        <h2>我的房间</h2>
+        <h2>公开房间</h2>
         <div className="row">
           <span className="muted">{user?.display_name}</span>
           <button className="btn btn-ghost" onClick={logout}>
@@ -147,20 +199,23 @@ export function RoomsPage() {
       {loading ? (
         <div className="empty">加载中…</div>
       ) : rooms.length === 0 ? (
-        <div className="empty">还没有房间，创建一个开始吧。</div>
+        <div className="empty">还没有公开房间，创建一个开始吧。</div>
       ) : (
         <div className="room-list">
           {rooms.map((room) => {
             const isOwner = String(room.owner_id) === String(user?.id);
+            const isMember = room.members.some(
+              (m) => String(m.user_id) === String(user?.id),
+            );
             return (
               <div
                 key={room.id}
                 className="room-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate(`/rooms/${room.id}`)}
+                onClick={() => void enterRoom(room)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") navigate(`/rooms/${room.id}`);
+                  if (e.key === "Enter") void enterRoom(room);
                 }}
               >
                 {isOwner && (
@@ -189,6 +244,7 @@ export function RoomsPage() {
                   {room.world_card === "ksim" && (
                     <span className="chip">🗺 女骑士模拟器</span>
                   )}
+                  {!isMember && <span className="chip">可加入</span>}
                 </div>
               </div>
             );

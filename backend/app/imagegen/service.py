@@ -7,10 +7,9 @@ and a dict {url, path, filename, prompt_id} is returned for static serving.
 
 from __future__ import annotations
 
-import uuid
-from pathlib import Path
 from typing import Any
 
+from . import media
 from .client import ensure_comfyui, restart_comfyui, submit_and_wait
 from .guard import (
     PoisonedPromptError,
@@ -25,16 +24,9 @@ from .workflows import (
     build_single_workflow,
 )
 
-MEDIA_DIR = Path(__file__).resolve().parents[1] / "media" / "generated"
-MEDIA_URL_PREFIX = "/media/generated"
-
-
-def _save_png(image_bytes: bytes) -> tuple[str, Path]:
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.png"
-    path = MEDIA_DIR / name
-    path.write_bytes(image_bytes)
-    return name, path
+MEDIA_DIR = media.MEDIA_DIR
+MEDIA_URL_PREFIX = media.MEDIA_URL_PREFIX
+save_png = media.save_png
 
 
 async def _run(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +43,7 @@ async def _run(workflow: dict[str, Any]) -> dict[str, Any]:
     if not image_bytes:
         return {"error": "成功但无图片字节"}
 
-    name, path = _save_png(image_bytes)
+    name, path = save_png(image_bytes)
     return {
         "url": f"{MEDIA_URL_PREFIX}/{name}",
         "path": str(path),

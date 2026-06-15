@@ -5,10 +5,15 @@ __pycache__/
 node_modules/
 .env
 *.db
+*.db.backup*
 *.sqlite3
 ComfyUI/output/
+outputs/
 backend/eval/ledger/
 backend/lore/chroma/
 backend/app/media/
 backend/app/memory_store/
 *.wav
+*.log
+*.tsbuildinfo
+.playwright-mcp/

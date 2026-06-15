@@ -26,9 +26,7 @@ async def _fresh_db():
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
@@ -73,9 +71,7 @@ async def test_register_login(client: AsyncClient):
     )
     assert bad.status_code == 401
 
-    me = await client.get(
-        "/api/me", headers={"Authorization": f"Bearer {token}"}
-    )
+    me = await client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["user"]["username"] == "alice"
 
@@ -140,18 +136,14 @@ async def test_message_seq_monotonic(client: AsyncClient):
             author_user_id=None,
         )
 
-    msgs = (
-        await client.get(f"/api/rooms/{rid}/messages", headers=ha)
-    ).json()
+    msgs = (await client.get(f"/api/rooms/{rid}/messages", headers=ha)).json()
     seqs = [m["seq"] for m in msgs]
     assert seqs == [1, 2, 3, 4, 5]
     assert seqs == sorted(seqs)
 
     # after_seq filtering
     tail = (
-        await client.get(
-            f"/api/rooms/{rid}/messages?after_seq=3", headers=ha
-        )
+        await client.get(f"/api/rooms/{rid}/messages?after_seq=3", headers=ha)
     ).json()
     assert [m["seq"] for m in tail] == [4, 5]
 
@@ -169,7 +161,7 @@ async def test_ai_busy_guard(monkeypatch):
 
     coord.broadcast = fake_broadcast  # type: ignore[method-assign]
 
-    async def slow_turn(c):
+    async def slow_turn(c, npc=None):
         started.set()
         await release.wait()
 
@@ -181,9 +173,7 @@ async def test_ai_busy_guard(monkeypatch):
 
     # second advance while busy -> immediate ai_busy error, no new turn
     await ws_mod._handle_advance(coord)
-    assert any(
-        p.get("type") == "error" and p.get("code") == "ai_busy" for p in sent
-    )
+    assert any(p.get("type") == "error" and p.get("code") == "ai_busy" for p in sent)
 
     release.set()
     await first

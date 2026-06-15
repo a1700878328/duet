@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, assetUrl } from "../lib/api";
-import type { NpcCard, RoomCards } from "../lib/types";
+import { MEDIA_GENERATION_ENABLED, VOICE_GENERATION_ENABLED } from "../lib/features";
+import type { MemberCard, NpcCard, RoomCards, UserCharacterCard } from "../lib/types";
 import { CardEditor, type CardDraft } from "./CardEditor";
+import type { ProfileView } from "./RoomOverlays";
 
 interface Props {
   roomId: string;
@@ -10,12 +12,15 @@ interface Props {
   onClose: () => void;
   // Make the given NPC react in the timeline (advance with npc_id).
   onNpcSpeak: (npcId: number) => void;
+  onGodWhisper?: (text: string) => void;
   onError?: (msg: string) => void;
   // Disable speak actions while an AI turn is in flight.
   aiBusy?: boolean;
   // Cards are owned by RoomPage so bubbles + panel share one source.
   cards: RoomCards | null;
   onRefresh: () => Promise<void> | void;
+  onOpenProfile?: (profile: ProfileView) => void;
+  onOpenCharacterSelect?: () => void;
 }
 
 const EMPTY_DRAFT: CardDraft = {
@@ -32,18 +37,25 @@ type EditTarget =
   | { kind: "new" }
   | null;
 
-// A round/rounded portrait thumbnail that opens full-size in a new tab.
-function AvatarThumb({ url, alt }: { url: string; alt: string }) {
+// A portrait thumbnail that opens the same in-page profile modal as chat avatars.
+function AvatarThumb({
+  url,
+  alt,
+  onClick,
+}: {
+  url: string;
+  alt: string;
+  onClick?: () => void;
+}) {
   return (
-    <a
+    <button
+      type="button"
       className="card-avatar-thumb"
-      href={assetUrl(url)}
-      target="_blank"
-      rel="noreferrer"
-      title="查看大图"
+      onClick={onClick}
+      title="查看角色资料"
     >
       <img src={assetUrl(url)} alt={alt} loading="lazy" />
-    </a>
+    </button>
   );
 }
 
@@ -53,10 +65,13 @@ export function CardPanel({
   open,
   onClose,
   onNpcSpeak,
+  onGodWhisper,
   onError,
   aiBusy = false,
   cards,
   onRefresh,
+  onOpenProfile,
+  onOpenCharacterSelect,
 }: Props) {
   const players = cards?.players ?? [];
   const npcs = cards?.npcs ?? [];
@@ -69,7 +84,14 @@ export function CardPanel({
   const [genHint, setGenHint] = useState("");
   // Per-target avatar-generation in flight (key "me" or npc id), + active toggles.
   const [avatarBusy, setAvatarBusy] = useState<Set<string>>(new Set());
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [npcVoiceBusy, setNpcVoiceBusy] = useState<Set<number>>(new Set());
   const [activeBusy, setActiveBusy] = useState<Set<number>>(new Set());
+  const [libraryCards, setLibraryCards] = useState<UserCharacterCard[]>([]);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [savingLibrary, setSavingLibrary] = useState(false);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewStopRef = useRef<number | null>(null);
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -83,12 +105,29 @@ export function CardPanel({
     await onRefresh();
   }, [onRefresh]);
 
+  const refreshLibrary = useCallback(async () => {
+    setLibraryBusy(true);
+    try {
+      setLibraryCards(await api.listMyCharacterCards());
+    } catch (err) {
+      fail(err, "读取账号角色库失败");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }, [fail]);
+
   // Refresh when the panel opens to keep cards fresh.
   useEffect(() => {
-    if (open) void refresh();
-  }, [open, refresh]);
+    if (open) {
+      void refresh();
+      void refreshLibrary();
+    }
+  }, [open, refresh, refreshLibrary]);
 
   const myCard = players.find((p) => String(p.user_id) === String(myUserId));
+  const otherPlayers = players.filter(
+    (p) => String(p.user_id) !== String(myUserId),
+  );
 
   function setBusy<T>(
     setter: React.Dispatch<React.SetStateAction<Set<T>>>,
@@ -118,6 +157,74 @@ export function CardPanel({
       fail(err, "保存我的角色卡失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function libraryBodyFromMember(card: MemberCard) {
+    return {
+      name: card.character_name,
+      persona: card.persona ?? "",
+      appearance: card.appearance ?? null,
+      voice_id: card.voice_id ?? null,
+      voice_ref_url: card.voice_ref_url ?? null,
+      voice_ref_text: card.voice_ref_text ?? null,
+      avatar_url: card.avatar_url ?? null,
+    };
+  }
+
+  async function saveMyCardToLibrary() {
+    if (!myCard) return;
+    setSavingLibrary(true);
+    try {
+      const sameName = libraryCards.find((c) => c.name === myCard.character_name);
+      const body = libraryBodyFromMember(myCard);
+      if (
+        sameName &&
+        window.confirm(`账号角色库里已有「${sameName.name}」。要覆盖它吗？`)
+      ) {
+        await api.updateMyCharacterCard(sameName.id, body);
+      } else {
+        await api.createMyCharacterCard(body);
+      }
+      await refreshLibrary();
+    } catch (err) {
+      fail(err, "保存到账号角色库失败");
+    } finally {
+      setSavingLibrary(false);
+    }
+  }
+
+  async function applyLibraryCard(card: UserCharacterCard) {
+    setLibraryBusy(true);
+    try {
+      await api.updateMeCard(roomId, {
+        character_name: card.name,
+        persona: card.persona,
+        appearance: card.appearance ?? null,
+        voice_id: card.voice_id ?? null,
+        voice_ref_url: card.voice_ref_url ?? null,
+        voice_ref_text: card.voice_ref_text ?? null,
+        avatar_url: card.avatar_url ?? null,
+        reset_stats: true,
+      });
+      await refresh();
+    } catch (err) {
+      fail(err, "读取账号角色失败");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  async function deleteLibraryCard(card: UserCharacterCard) {
+    if (!window.confirm(`从账号角色库删除「${card.name}」？`)) return;
+    setLibraryBusy(true);
+    try {
+      await api.deleteMyCharacterCard(card.id);
+      await refreshLibrary();
+    } catch (err) {
+      fail(err, "删除账号角色失败");
+    } finally {
+      setLibraryBusy(false);
     }
   }
 
@@ -180,6 +287,57 @@ export function CardPanel({
     }
   }
 
+  async function genMyVoice() {
+    setVoiceBusy(true);
+    try {
+      await api.generateMyVoice(roomId);
+      await refresh();
+    } catch (err) {
+      fail(err, "设定我的角色语音失败");
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  function previewVoice(url?: string | null) {
+    if (!url) return;
+    if (previewStopRef.current !== null) {
+      window.clearTimeout(previewStopRef.current);
+      previewStopRef.current = null;
+    }
+    previewAudioRef.current?.pause();
+
+    const audio = new Audio(assetUrl(url));
+    previewAudioRef.current = audio;
+    const clipSeconds = 8;
+    const playClip = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      if (duration > clipSeconds + 1) {
+        audio.currentTime = Math.random() * Math.max(0, duration - clipSeconds);
+      }
+      void audio
+        .play()
+        .then(() => {
+          previewStopRef.current = window.setTimeout(() => {
+            audio.pause();
+            previewStopRef.current = null;
+          }, clipSeconds * 1000);
+        })
+        .catch(() => {
+          onError?.("试听角色语音失败");
+        });
+    };
+
+    audio.addEventListener("loadedmetadata", playClip, { once: true });
+    audio.addEventListener(
+      "error",
+      () => {
+        onError?.("试听角色语音失败");
+      },
+      { once: true },
+    );
+  }
+
   async function genNpcAvatar(npc: NpcCard) {
     const key = String(npc.id);
     setBusy(setAvatarBusy, key, true);
@@ -190,6 +348,18 @@ export function CardPanel({
       fail(err, "生成头像失败");
     } finally {
       setBusy(setAvatarBusy, key, false);
+    }
+  }
+
+  async function genNpcVoice(npc: NpcCard) {
+    setBusy(setNpcVoiceBusy, npc.id, true);
+    try {
+      await api.generateNpcVoice(roomId, npc.id);
+      await refresh();
+    } catch (err) {
+      fail(err, "设定角色语音失败");
+    } finally {
+      setBusy(setNpcVoiceBusy, npc.id, false);
     }
   }
 
@@ -223,11 +393,18 @@ export function CardPanel({
 
   const myAvatarBusy = avatarBusy.has("me");
 
+  function closePanel() {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    onClose();
+  }
+
   return (
     <>
       <div
         className={`card-panel-backdrop ${open ? "open" : ""}`}
-        onClick={onClose}
+        onClick={closePanel}
         aria-hidden
       />
       <aside className={`card-panel ${open ? "open" : ""}`} aria-hidden={!open}>
@@ -235,7 +412,7 @@ export function CardPanel({
           <h3>🎭 角色与登场 NPC</h3>
           <button
             className="btn btn-ghost card-panel-close"
-            onClick={onClose}
+            onClick={closePanel}
             aria-label="关闭"
           >
             ✕
@@ -279,6 +456,16 @@ export function CardPanel({
                   <AvatarThumb
                     url={myCard.avatar_url}
                     alt={myCard.character_name}
+                    onClick={() =>
+                      onOpenProfile?.({
+                        kind: "player",
+                        name: myCard.character_name,
+                        avatarUrl: myCard.avatar_url,
+                        appearance: myCard.appearance,
+                        persona: myCard.persona,
+                        stats: myCard.stats ?? null,
+                      })
+                    }
                   />
                 )}
                 <div className="card-row-main">
@@ -287,21 +474,75 @@ export function CardPanel({
                     {myCard.persona || "（还没有人设，点编辑补充）"}
                   </div>
                   <div className="card-row-actions">
+                    {MEDIA_GENERATION_ENABLED && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={genMyAvatar}
+                        disabled={myAvatarBusy}
+                        title="根据外貌描述生成头像（约 30–60 秒）"
+                      >
+                        {myAvatarBusy ? (
+                          <>
+                            <span className="spinner spinner-dark" />
+                            生成头像中…
+                          </>
+                        ) : myCard.avatar_url ? (
+                          "🎨 重新生成头像"
+                        ) : (
+                          "🎨 生成头像"
+                        )}
+                      </button>
+                    )}
+                    {VOICE_GENERATION_ENABLED && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={genMyVoice}
+                        disabled={voiceBusy}
+                        title="根据当前角色卡设定 Eleven 角色语音"
+                      >
+                        {voiceBusy ? (
+                          <>
+                            <span className="spinner spinner-dark" />
+                            设定语音中…
+                          </>
+                        ) : myCard.voice_id ? (
+                          "🔁 重生语音"
+                        ) : (
+                          "🎙️ 设定角色语音"
+                        )}
+                      </button>
+                    )}
+                    {VOICE_GENERATION_ENABLED && myCard.voice_ref_url && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => previewVoice(myCard.voice_ref_url)}
+                        title="试听当前角色语音"
+                      >
+                        ▶ 试听语音
+                      </button>
+                    )}
+                    {onOpenCharacterSelect && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={onOpenCharacterSelect}
+                        title="重新打开 AI 选角，生成并选择完整角色卡"
+                      >
+                        ✨ AI 选角
+                      </button>
+                    )}
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={genMyAvatar}
-                      disabled={myAvatarBusy}
-                      title="根据外貌描述生成头像（约 30–60 秒）"
+                      onClick={saveMyCardToLibrary}
+                      disabled={savingLibrary}
+                      title="把当前角色卡永久保存到账号，可在其他房间读取"
                     >
-                      {myAvatarBusy ? (
+                      {savingLibrary ? (
                         <>
                           <span className="spinner spinner-dark" />
-                          生成头像中…
+                          保存中…
                         </>
-                      ) : myCard.avatar_url ? (
-                        "🎨 重新生成头像"
                       ) : (
-                        "🎨 生成头像"
+                        "保存到账号"
                       )}
                     </button>
                   </div>
@@ -311,6 +552,102 @@ export function CardPanel({
               loaded && <div className="muted">未找到你的角色卡。</div>
             )}
           </section>
+
+          <section className="card-section">
+            <div className="card-section-head">
+              <h4>账号角色库</h4>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => void refreshLibrary()}
+                disabled={libraryBusy}
+              >
+                刷新
+              </button>
+            </div>
+            {libraryBusy && libraryCards.length === 0 ? (
+              <div className="empty">读取账号角色库中…</div>
+            ) : libraryCards.length === 0 ? (
+              <div className="muted">
+                还没有保存的账号角色。把当前角色保存后，就能在其他房间读取。
+              </div>
+            ) : (
+              <div className="player-list">
+                {libraryCards.map((card) => (
+                  <div className="card-row" key={card.id}>
+                    {card.avatar_url && (
+                      <AvatarThumb url={card.avatar_url} alt={card.name} />
+                    )}
+                    <div className="card-row-main">
+                      <div className="card-row-name">
+                        {card.name}
+                        <span className="tag">账号卡</span>
+                      </div>
+                      <div className="card-row-sub muted">{card.persona}</div>
+                      <div className="card-row-actions">
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void applyLibraryCard(card)}
+                          disabled={libraryBusy}
+                        >
+                          读取到本房间
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm btn-danger"
+                          onClick={() => void deleteLibraryCard(card)}
+                          disabled={libraryBusy}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* ---- 其他玩家 ---- */}
+          {otherPlayers.length > 0 && (
+            <section className="card-section">
+              <div className="card-section-head">
+                <h4>其他玩家（{otherPlayers.length}）</h4>
+              </div>
+              <div className="player-list">
+                {otherPlayers.map((player) => (
+                  <div className="card-row" key={player.user_id}>
+                    {player.avatar_url && (
+                      <AvatarThumb
+                        url={player.avatar_url}
+                        alt={player.character_name}
+                        onClick={() =>
+                          onOpenProfile?.({
+                            kind: "player",
+                            name: player.character_name,
+                            avatarUrl: player.avatar_url,
+                            appearance: player.appearance,
+                            persona: player.persona,
+                            stats: player.stats ?? null,
+                          })
+                        }
+                      />
+                    )}
+                    <div className="card-row-main">
+                      <div className="card-row-name">
+                        {player.character_name}
+                        <span className="tag">玩家</span>
+                      </div>
+                      <div className="card-row-scene">
+                        {player.display_name}
+                      </div>
+                      <div className="card-row-sub muted">
+                        {player.persona || "（还没有人设）"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* ---- 登场 NPC ---- */}
           <section className="card-section">
@@ -326,7 +663,9 @@ export function CardPanel({
 
             <div className="npc-list">
               {npcs.map((npc) => {
+                const isGod = npc.id === 0 || npc.name === "上帝";
                 const busyAvatar = avatarBusy.has(String(npc.id));
+                const busyVoice = npcVoiceBusy.has(npc.id);
                 const busyActive = activeBusy.has(npc.id);
                 if (editing?.kind === "npc" && editing.npc.id === npc.id) {
                   return (
@@ -352,7 +691,22 @@ export function CardPanel({
                   >
                     <div className="npc-row-top">
                       {npc.avatar_url && (
-                        <AvatarThumb url={npc.avatar_url} alt={npc.name} />
+                        <AvatarThumb
+                          url={npc.avatar_url}
+                          alt={npc.name}
+                          onClick={() =>
+                            onOpenProfile?.({
+                              kind: "npc",
+                              id: npc.id,
+                              name: npc.name,
+                              avatarUrl: npc.avatar_url,
+                              appearance: npc.appearance,
+                              persona: npc.persona,
+                              scene: npc.scene,
+                              discovered: npc.discovered,
+                            })
+                          }
+                        />
                       )}
                       <div className="card-row-main">
                         <div className="card-row-name">
@@ -387,54 +741,104 @@ export function CardPanel({
                           className={`switch ${npc.active ? "on" : ""} ${
                             busyActive ? "busy" : ""
                           }`}
-                          onClick={() => !busyActive && toggleActive(npc)}
+                          onClick={() => !isGod && !busyActive && toggleActive(npc)}
                           role="switch"
                           aria-checked={npc.active}
                         />
                       </label>
                     </div>
                     <div className="npc-actions">
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => onNpcSpeak(npc.id)}
-                        disabled={aiBusy || !npc.active}
-                        title={
-                          npc.active
-                            ? "让这个 NPC 在时间线里接话"
-                            : "已关闭的 NPC 不能接话"
-                        }
-                      >
-                        让 TA 接话
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => genNpcAvatar(npc)}
-                        disabled={busyAvatar}
-                        title="根据外貌描述生成头像（约 30–60 秒）"
-                      >
-                        {busyAvatar ? (
-                          <>
-                            <span className="spinner spinner-dark" />
-                            头像生成中…
-                          </>
-                        ) : npc.avatar_url ? (
-                          "🎨 重生头像"
-                        ) : (
-                          "🎨 头像"
-                        )}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setEditing({ kind: "npc", npc })}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm btn-danger"
-                        onClick={() => removeNpc(npc)}
-                      >
-                        删除
-                      </button>
+                      {isGod ? (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => {
+                            const text = window.prompt(
+                              "私聊上帝：你想强制影响当前场景里的 NPC 做什么？",
+                            );
+                            if (text?.trim()) onGodWhisper?.(text.trim());
+                          }}
+                          disabled={aiBusy}
+                          title="私聊上帝，暗中强制影响当前场景 NPC 的行动"
+                        >
+                          私聊上帝
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => onNpcSpeak(npc.id)}
+                          disabled={aiBusy || !npc.active}
+                          title={
+                            npc.active
+                              ? "让这个 NPC 在时间线里接话"
+                              : "已关闭的 NPC 不能接话"
+                          }
+                        >
+                          让 TA 接话
+                        </button>
+                      )}
+                      {MEDIA_GENERATION_ENABLED && !isGod && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => genNpcAvatar(npc)}
+                          disabled={busyAvatar}
+                          title="根据外貌描述生成头像（约 30–60 秒）"
+                        >
+                          {busyAvatar ? (
+                            <>
+                              <span className="spinner spinner-dark" />
+                              头像生成中…
+                            </>
+                          ) : npc.avatar_url ? (
+                            "🎨 重生头像"
+                          ) : (
+                            "🎨 头像"
+                          )}
+                        </button>
+                      )}
+                      {VOICE_GENERATION_ENABLED && !isGod && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => genNpcVoice(npc)}
+                          disabled={busyVoice}
+                          title="根据角色卡设定 Eleven 角色语音"
+                        >
+                          {busyVoice ? (
+                            <>
+                              <span className="spinner spinner-dark" />
+                              设定语音中…
+                            </>
+                          ) : npc.voice_ref_url ? (
+                            "🔁 重生语音"
+                          ) : (
+                            "🎙️ 设定角色语音"
+                          )}
+                        </button>
+                      )}
+                      {VOICE_GENERATION_ENABLED && !isGod && npc.voice_ref_url && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => previewVoice(npc.voice_ref_url)}
+                          title="试听当前角色语音"
+                        >
+                          ▶ 试听
+                        </button>
+                      )}
+                      {!isGod && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setEditing({ kind: "npc", npc })}
+                        >
+                          编辑
+                        </button>
+                      )}
+                      {!isGod && (
+                        <button
+                          className="btn btn-ghost btn-sm btn-danger"
+                          onClick={() => removeNpc(npc)}
+                        >
+                          删除
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

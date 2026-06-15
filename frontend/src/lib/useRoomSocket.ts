@@ -23,7 +23,11 @@ interface UseRoomSocketOptions {
   onCardsChanged?: () => void;
   onStats?: (ev: StatsEvent) => void;
   onWeek?: (week: number) => void;
+  onTime?: (ev: { week: number; day: number; time_slot: number; time_label: string }) => void;
   onScene?: (scene: string) => void;
+  onSceneLogsChanged?: () => void;
+  onSayDraft?: (content: string) => void;
+  onGodReply?: (content: string) => void;
 }
 
 interface UseRoomSocketResult {
@@ -34,10 +38,14 @@ interface UseRoomSocketResult {
   aiBusy: boolean;
   imaging: boolean;
   say: (content: string) => void;
+  polishSay: (content: string) => void;
   advance: (npcId?: number) => void;
   timeskip: () => void;
-  requestImage: (nsfw: boolean) => void;
+  describeScene: () => void;
+  requestImage: () => void;
+  godWhisper: (content: string) => void;
   gotoScene: (scene: string) => void;
+  payNpc: (npcId: number, amount: number) => void;
   setTyping: (isTyping: boolean) => void;
 }
 
@@ -55,7 +63,11 @@ export function useRoomSocket({
   onCardsChanged,
   onStats,
   onWeek,
+  onTime,
   onScene,
+  onSceneLogsChanged,
+  onSayDraft,
+  onGodReply,
 }: UseRoomSocketOptions): UseRoomSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -77,8 +89,16 @@ export function useRoomSocket({
   onStatsRef.current = onStats;
   const onWeekRef = useRef(onWeek);
   onWeekRef.current = onWeek;
+  const onTimeRef = useRef(onTime);
+  onTimeRef.current = onTime;
   const onSceneRef = useRef(onScene);
   onSceneRef.current = onScene;
+  const onSceneLogsChangedRef = useRef(onSceneLogsChanged);
+  onSceneLogsChangedRef.current = onSceneLogsChanged;
+  const onSayDraftRef = useRef(onSayDraft);
+  onSayDraftRef.current = onSayDraft;
+  const onGodReplyRef = useRef(onGodReply);
+  onGodReplyRef.current = onGodReply;
 
   // Merge messages keeping seq order and de-duping by seq.
   const mergeMessages = useCallback((incoming: Message[]) => {
@@ -128,21 +148,46 @@ export function useRoomSocket({
         case "week":
           onWeekRef.current?.(event.week);
           break;
+        case "time":
+          onTimeRef.current?.({
+            week: event.week,
+            day: event.day,
+            time_slot: event.time_slot,
+            time_label: event.time_label,
+          });
+          break;
         case "scene":
           onSceneRef.current?.(event.scene);
+          break;
+        case "scene_logs_changed":
+          onSceneLogsChangedRef.current?.();
+          break;
+        case "say_draft":
+          onSayDraftRef.current?.(event.content);
+          break;
+        case "god_reply":
+          onGodReplyRef.current?.(event.content);
           break;
         case "ai_delta":
           setAiBusy(true);
           setStreaming((prev) => {
             if (prev && prev.turn_id === event.turn_id) {
-              return { ...prev, content: prev.content + event.delta };
+              return {
+                ...prev,
+                speaker_label: event.speaker_label ?? prev.speaker_label,
+                content: prev.content + event.delta,
+              };
             }
             return {
               turn_id: event.turn_id,
               seq: event.seq,
+              speaker_label: event.speaker_label,
               content: event.delta,
             };
           });
+          break;
+        case "ai_status":
+          setAiBusy(event.busy);
           break;
         case "ai_done": {
           setStreaming(null);
@@ -154,7 +199,7 @@ export function useRoomSocket({
               seq: event.seq,
               author_type: "ai",
               author_user_id: null,
-              speaker_label: "NPC",
+              speaker_label: event.speaker_label || "NPC",
               content: event.content,
               created_at: new Date().toISOString(),
             },
@@ -169,7 +214,7 @@ export function useRoomSocket({
           });
           break;
         case "error":
-          if (event.code === "ai_busy") setAiBusy(false);
+          if (event.code === "ai_busy") setAiBusy(true);
           if (event.code === "image_failed" || event.code === "image_busy")
             setImaging(false);
           onErrorRef.current?.(event.code, event.detail);
@@ -248,6 +293,14 @@ export function useRoomSocket({
     [send],
   );
 
+  const polishSay = useCallback(
+    (content: string) => {
+      const trimmed = content.trim();
+      if (trimmed) send({ type: "polish_say", content: trimmed });
+    },
+    [send],
+  );
+
   const advance = useCallback(
     (npcId?: number) => {
       setAiBusy(true);
@@ -265,10 +318,26 @@ export function useRoomSocket({
     send({ type: "timeskip" });
   }, [send]);
 
+  const describeScene = useCallback(() => {
+    setAiBusy(true);
+    send({ type: "describe_scene" });
+  }, [send]);
+
   const requestImage = useCallback(
-    (nsfw: boolean) => {
+    () => {
       setImaging(true);
-      send({ type: "image", nsfw });
+      send({ type: "image" });
+    },
+    [send],
+  );
+
+  const godWhisper = useCallback(
+    (content: string) => {
+      const trimmed = content.trim();
+      if (trimmed) {
+        setAiBusy(true);
+        send({ type: "god_whisper", content: trimmed });
+      }
     },
     [send],
   );
@@ -279,6 +348,17 @@ export function useRoomSocket({
       if (dest) {
         setAiBusy(true);
         send({ type: "goto_scene", scene: dest });
+      }
+    },
+    [send],
+  );
+
+  const payNpc = useCallback(
+    (npcId: number, amount: number) => {
+      const safeAmount = Math.floor(amount);
+      if (npcId > 0 && safeAmount > 0) {
+        setAiBusy(true);
+        send({ type: "pay_npc", npc_id: npcId, amount: safeAmount });
       }
     },
     [send],
@@ -297,10 +377,14 @@ export function useRoomSocket({
     aiBusy,
     imaging,
     say,
+    polishSay,
     advance,
     timeskip,
+    describeScene,
     requestImage,
+    godWhisper,
     gotoScene,
+    payNpc,
     setTyping,
   };
 }

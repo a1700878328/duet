@@ -16,13 +16,70 @@ export interface RoomMember {
   appearance?: string | null;
   persona?: string | null;
   voice_id?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
   avatar_url?: string | null;
+  stats?: CharStats | null;
+}
+
+export interface TaskRewards {
+  金钱?: number;
+  经验?: number;
+  物品?: string[];
+  好感度?: Record<string, number>;
+  [key: string]: number | string | string[] | Record<string, number> | undefined;
+}
+
+export interface TaskInfo {
+  id: string;
+  title?: string;
+  issuer?: string;
+  issuer_npc_id?: number | null;
+  status?: string;
+  description?: string;
+  objectives?: string[];
+  rewards?: TaskRewards;
+  created_at?: string;
+  accepted_at?: string;
+  completed_at?: string;
+}
+
+// 结构化物品（对应后端 game_models.Item）
+export interface InventoryItem {
+  id: string;
+  name: string;
+  type: string; // 武器/防具/消耗品/任务道具/贵重品/素材
+  quantity: number;
+  description: string;
+  equippable: boolean;
+  usable: boolean;
+  effects?: Record<string, number>;
+  icon?: string;
+}
+
+// 结构化状态（对应后端 game_models.StatusEffect）
+export interface StatusEffect {
+  id: string;
+  name: string;
+  group: string; // 监禁/怀孕/诅咒/契约/标记/债务
+  source: string;
+  days: number;
+  severity: number;
+  effects?: Record<string, number>;
+  escape_dc: number;
+  description: string;
 }
 
 // A 《女骑士模拟器》-style stat sheet. Mostly numeric stats (经验/开发/淫乱向),
-// plus a few string fields (职业/冒险者等级), a 状态 tag list, and a 好感度 map.
-// Loose by design: the AI judge may emit new keys, so we keep an index signature.
-export type StatValue = number | string | string[] | Record<string, number>;
+// plus structured sub-objects for 物品栏 and 状态.
+export type StatValue =
+  | number
+  | string
+  | string[]
+  | TaskRewards
+  | Record<string, number>
+  | InventoryItem[]
+  | StatusEffect[];
 
 export interface CharStats {
   // 基础
@@ -35,10 +92,13 @@ export interface CharStats {
   智力?: number;
   意志?: number;
   金钱?: number;
-  支出?: number;
-  // 状态 / 关系
-  状态?: string[];
+  // 结构化子对象（新版）
+  物品栏?: InventoryItem[];
+  状态?: StatusEffect[];
+  // 旧版兼容（字符串列表）
   好感度?: Record<string, number>;
+  物品?: string[];
+  // 旧版状态字符串列表（新版用时=空数组）
   // 经验·开发 与未知字段
   [key: string]: StatValue | undefined;
 }
@@ -51,6 +111,8 @@ export interface MemberCard {
   appearance: string | null;
   persona: string | null;
   voice_id: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
   avatar_url?: string | null;
   stats?: CharStats | null;
 }
@@ -62,6 +124,8 @@ export interface NpcCard {
   persona: string;
   appearance?: string | null;
   voice_id?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
   created_by_ai: boolean;
   active: boolean;
   avatar_url?: string | null;
@@ -83,7 +147,23 @@ export interface CharDraft {
   avatar_url?: string | null;
 }
 
+export interface UserCharacterCard {
+  id: number;
+  name: string;
+  persona: string;
+  appearance?: string | null;
+  voice_id?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
+  avatar_url?: string | null;
+  source_world_card?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type AiMode = "manual" | "auto";
+
+export type CurrentTask = TaskInfo;
 
 export interface Room {
   id: string;
@@ -92,7 +172,13 @@ export interface Room {
   ai_mode: AiMode;
   world_card?: string | null;
   week?: number;
+  day?: number;
+  time_slot?: number;
+  time_label?: string;
   current_scene?: string;
+  scene_options?: string[];
+  current_task?: CurrentTask | null;
+  task_offers?: TaskInfo[];
   members: RoomMember[];
 }
 
@@ -125,6 +211,7 @@ export interface WsAiDelta {
   type: "ai_delta";
   turn_id: string;
   seq: number;
+  speaker_label?: string;
   delta: string;
 }
 
@@ -132,6 +219,7 @@ export interface WsAiDone {
   type: "ai_done";
   turn_id: string;
   seq: number;
+  speaker_label?: string;
   content: string;
   finish_reason: string;
 }
@@ -147,6 +235,22 @@ export interface WsError {
   type: "error";
   code: string;
   detail: string;
+}
+
+export interface WsSayDraft {
+  type: "say_draft";
+  content: string;
+}
+
+export interface WsGodReply {
+  type: "god_reply";
+  content: string;
+  private_to?: number;
+}
+
+export interface WsAiStatus {
+  type: "ai_status";
+  busy: boolean;
 }
 
 export interface WsImagePending {
@@ -168,10 +272,29 @@ export interface WsStats {
   delta: Record<string, StatValue>;
 }
 
+export interface WsTaskOffer {
+  type: "task_offer";
+  task: TaskInfo;
+}
+
+export interface WsTaskState {
+  type: "task_state";
+  current_task: TaskInfo | null;
+  offers: TaskInfo[];
+}
+
 // 叙事时间推进到第 N 周（timeskip 或导演跳时；每满 4 周月末结算）。
 export interface WsWeek {
   type: "week";
   week: number;
+}
+
+export interface WsTime {
+  type: "time";
+  week: number;
+  day: number;
+  time_slot: number;
+  time_label: string;
 }
 
 // 切换到新场景（导演只调当前场景 NPC）。
@@ -180,25 +303,52 @@ export interface WsScene {
   scene: string;
 }
 
+export interface WsSceneLogsChanged {
+  type: "scene_logs_changed";
+}
+
+export interface SceneLogEntry {
+  scene: string;
+  time_label: string;
+  speaker_label: string;
+  content: string;
+  kind: string;
+}
+
+export interface SceneLogResponse {
+  current_scene: string;
+  scenes: string[];
+  logs: Record<string, SceneLogEntry[]>;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
   | WsAiDelta
   | WsAiDone
+  | WsAiStatus
   | WsPresence
   | WsImagePending
   | WsCardsChanged
   | WsStats
   | WsWeek
+  | WsTime
   | WsScene
+  | WsSceneLogsChanged
+  | WsSayDraft
+  | WsGodReply
   | WsError;
 
 export type WsClientEvent =
   | { type: "say"; content: string }
+  | { type: "polish_say"; content: string }
   | { type: "advance"; npc_id?: number }
   | { type: "timeskip" }
   | { type: "goto_scene"; scene: string }
-  | { type: "image"; nsfw: boolean }
+  | { type: "describe_scene" }
+  | { type: "god_whisper"; content: string }
+  | { type: "pay_npc"; npc_id: number; amount: number }
+  | { type: "image" }
   | { type: "typing"; is_typing: boolean };
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
@@ -207,5 +357,6 @@ export type ConnectionStatus = "connecting" | "open" | "closed";
 export interface StreamingTurn {
   turn_id: string;
   seq: number;
+  speaker_label?: string;
   content: string;
 }
