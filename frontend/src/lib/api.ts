@@ -1,7 +1,9 @@
 import type {
   AuthResponse,
   CharDraft,
+  AvatarVariant,
   MemberCard,
+  SceneDesignOut,
   Message,
   NpcCard,
   Room,
@@ -9,6 +11,7 @@ import type {
   SceneLogResponse,
   User,
   UserCharacterCard,
+  VoiceVariant,
 } from "./types";
 
 export interface MeCardBody {
@@ -19,6 +22,8 @@ export interface MeCardBody {
   avatar_url?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[] | null;
+  avatar_variants?: AvatarVariant[] | null;
   reset_stats?: boolean;
 }
 
@@ -29,7 +34,9 @@ export interface UserCharacterCardBody {
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[] | null;
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[] | null;
   source_world_card?: string | null;
 }
 
@@ -253,6 +260,25 @@ export const api = {
       method: "POST",
     }),
 
+  selectMyAvatar: (roomId: string, avatarUrl: string) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card/avatar/current`, {
+      method: "PUT",
+      body: JSON.stringify({ avatar_url: avatarUrl }),
+    }),
+
+  // AI character designer: description → structured draft.
+  designCharacter: (roomId: string, hint: string) =>
+    request<CharDraft>(`/rooms/${roomId}/design-character`, {
+      method: "POST",
+      body: JSON.stringify({ hint, count: 1 }),
+    }),
+
+  selectMyVoice: (roomId: string, voiceRefUrl: string) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card/voice/current`, {
+      method: "PUT",
+      body: JSON.stringify({ voice_ref_url: voiceRefUrl }),
+    }),
+
   // Ask AI to create a role voice design and reference sample.
   generateMyVoice: (roomId: string) =>
     request<MemberCard>(`/rooms/${roomId}/me-card/voice`, {
@@ -265,10 +291,42 @@ export const api = {
       method: "POST",
     }),
 
+  selectNpcAvatar: (roomId: string, npcId: number, avatarUrl: string) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/avatar/current`, {
+      method: "PUT",
+      body: JSON.stringify({ avatar_url: avatarUrl }),
+    }),
+
+  selectNpcVoice: (roomId: string, npcId: number, voiceRefUrl: string) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/voice/current`, {
+      method: "PUT",
+      body: JSON.stringify({ voice_ref_url: voiceRefUrl }),
+    }),
+
   // Generate an NPC's role voice reference sample.
   generateNpcVoice: (roomId: string, npcId: number) =>
     request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/voice`, {
       method: "POST",
+    }),
+
+  // Evolve NPC: adjust appearance tags from current persona → new portrait.
+  evolveNpc: (roomId: string, npcId: number) =>
+    request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/evolve`, {
+      method: "POST",
+    }),
+
+  // Evolve player character: same as evolveNpc but for the logged-in member.
+  evolveMyCard: (roomId: string, personaAdd: string) =>
+    request<MemberCard>(`/rooms/${roomId}/me-card/evolve`, {
+      method: "POST",
+      body: JSON.stringify({ persona_add: personaAdd }),
+    }),
+
+  // AI scene designer: description + context → scene type/atmosphere/npcs.
+  designScene: (roomId: string, sceneName: string, description?: string) =>
+    request<SceneDesignOut>(`/rooms/${roomId}/design-scene`, {
+      method: "POST",
+      body: JSON.stringify({ scene_name: sceneName, description: description ?? null }),
     }),
 
   // Enable/disable an NPC (= include/exclude from director simulation).

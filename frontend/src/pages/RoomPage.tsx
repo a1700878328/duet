@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { CardPanel } from "../components/CardPanel";
 import { CharacterSelect } from "../components/CharacterSelect";
@@ -82,7 +81,6 @@ export function RoomPage() {
   const [sceneLog, setSceneLog] = useState<SceneLogResponse | null>(null);
   const [sceneLogLoading, setSceneLogLoading] = useState(false);
   const [selectedScene, setSelectedScene] = useState("");
-  const [sceneMoveText, setSceneMoveText] = useState("");
   const sceneLogEntriesRef = useRef<HTMLDivElement>(null);
   // 页内悬浮窗：点头像看资料 / 点图看大图。
   const [overlay, setOverlay] = useState<
@@ -121,6 +119,12 @@ export function RoomPage() {
   }, [refreshCards, refreshRoom]);
 
   const [voicing, setVoicing] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageText, setImageText] = useState("");
+  const [imageChars, setImageChars] = useState<Set<string>>(new Set());
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveScene, setMoveScene] = useState("");
+  const [selectedMoveNpcs, setSelectedMoveNpcs] = useState<Set<string>>(new Set());
 
   const toastTimer = useRef<number | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -192,10 +196,10 @@ export function RoomPage() {
     say,
     polishSay,
     advance,
-    gotoScene,
     payNpc,
     describeScene,
     requestImage,
+    moveNpcs,
     godWhisper,
     setTyping,
   } = useRoomSocket({
@@ -266,6 +270,27 @@ export function RoomPage() {
         voice_ref_text: n.voice_ref_text,
         avatar_url: n.avatar_url,
       });
+    return m;
+  }, [cards]);
+
+  // Player voice lookup (author_type "user") by character_name → voice settings.
+  const playerByName = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        voice_id?: string | null;
+        voice_ref_url?: string | null;
+        voice_ref_text?: string | null;
+      }
+    >();
+    for (const p of cards?.players ?? []) {
+      const key = p.character_name || p.display_name;
+      m.set(key, {
+        voice_id: p.voice_id,
+        voice_ref_url: p.voice_ref_url,
+        voice_ref_text: p.voice_ref_text,
+      });
+    }
     return m;
   }, [cards]);
 
@@ -390,7 +415,7 @@ export function RoomPage() {
   // re-synthesize — it just re-points to the same durable /media file).
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCacheKey = `duet:tts:${roomId}`;
-  const ttsCacheRef = useRef<Map<number, string>>(new Map());
+  const ttsCacheRef = useRef<Map<string, string>>(new Map());
   // Hydrate the cache once from localStorage on mount.
   useEffect(() => {
     try {
@@ -432,6 +457,7 @@ export function RoomPage() {
     }
     playingRef.current = true;
     audio.src = assetUrl(next);
+    audio.currentTime = 0;
     void audio.play().catch(() => {
       playingRef.current = false;
       drainQueue();
@@ -439,8 +465,20 @@ export function RoomPage() {
   }, []);
 
   const enqueueVoice = useCallback(
-    async (msg: Message, regenerate = false) => {
-      const cached = ttsCacheRef.current.get(msg.seq);
+    async (
+      msg: Message,
+      regenerate = false,
+      voiceOverride?: {
+        voice_id?: string | null;
+        voice_ref_url?: string | null;
+        voice_ref_text?: string | null;
+      } | null,
+    ) => {
+      const speaker = voiceOverride ?? npcByName.get(msg.speaker_label);
+      // Composite cache key: seq + voice config — so changing voice = cache miss.
+      const cfgKey = `${speaker?.voice_id ?? ""}|${speaker?.voice_ref_url ?? ""}`;
+      const cacheKey = `${msg.seq}:${cfgKey}`;
+      const cached = ttsCacheRef.current.get(cacheKey);
       if (cached && !regenerate) {
         playQueueRef.current.push(cached);
         drainQueue();
@@ -448,7 +486,6 @@ export function RoomPage() {
       }
       const text = stripSpeakerPrefix(msg.content);
       if (!text) return;
-      const speaker = npcByName.get(msg.speaker_label);
       setVoicing(true);
       try {
         const { url } = await api.tts(
@@ -459,7 +496,7 @@ export function RoomPage() {
           speaker?.voice_ref_text ?? null,
           regenerate,
         );
-        ttsCacheRef.current.set(msg.seq, url);
+        ttsCacheRef.current.set(cacheKey, url);
         persistTtsCache();
         playQueueRef.current.push(url);
         drainQueue();
@@ -496,18 +533,6 @@ export function RoomPage() {
     },
     [polishSay],
   );
-  const submitSceneMove = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const dest = sceneMoveText.trim();
-      if (!dest) return;
-      gotoScene(dest);
-      setSelectedScene(dest);
-      setSceneMoveText("");
-    },
-    [gotoScene, sceneMoveText],
-  );
-
   if (loadError) {
     return (
       <div className="center-screen">
@@ -562,6 +587,17 @@ export function RoomPage() {
                 ? "连接中"
                 : "已断开"}
           </span>
+          <button
+            className="btn btn-ghost cards-toggle"
+            onClick={() => {
+              setCharSelectForced(true);
+              setPanelOpen(false);
+              setStatsOpen(false);
+            }}
+            title="重新打开房间选人，选择账号卡、主角、世界角色或 AI 原创角色"
+          >
+            ✨ 选角
+          </button>
           <button
             className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
             onClick={() => {
@@ -620,10 +656,15 @@ export function RoomPage() {
             isMe={m.author_type === "user" && m.author_user_id === user?.id}
             avatarUrl={resolveAvatar(m)}
             onPlayVoice={
-              VOICE_GENERATION_ENABLED &&
-              m.author_type === "ai" &&
-              npcByName.has(m.speaker_label)
-                ? () => void enqueueVoice(m)
+              VOICE_GENERATION_ENABLED
+                ? m.author_type === "ai" && npcByName.has(m.speaker_label)
+                  ? () => void enqueueVoice(m)
+                  : m.author_type === "user"
+                    ? (() => {
+                        const pv = playerByName.get(m.speaker_label);
+                        return pv ? () => void enqueueVoice(m, false, pv) : undefined;
+                      })()
+                    : undefined
                 : undefined
             }
             onAvatarClick={() => openProfile(m)}
@@ -679,23 +720,25 @@ export function RoomPage() {
           polishing={polishingSay}
           draftText={sayDraft}
         />
-        {MEDIA_GENERATION_ENABLED && (
+        <div className="composer-actions">
+          {MEDIA_GENERATION_ENABLED && (
+            <button
+              className="btn"
+              onClick={() => setImageModalOpen(true)}
+              disabled={imaging}
+              title="生成场景图像"
+            >
+              {imaging ? <><span className="spinner" />生成中</> : "📷 生成"}
+            </button>
+          )}
           <button
             className="btn"
-            onClick={() => requestImage()}
-            disabled={imaging || status !== "open"}
-            title="根据当前场景生成图；R18 场景会自动生成 R18 图"
+            onClick={() => setMoveModalOpen(true)}
+            title="前往其他场景"
           >
-            {imaging ? (
-              <>
-                <span className="spinner" />
-                生成图中…
-              </>
-            ) : (
-              "🎬 场景图"
-            )}
+            🚶 移动
           </button>
-        )}
+        </div>
       </div>
 
       <CardPanel
@@ -713,10 +756,12 @@ export function RoomPage() {
           advance(npcId);
           setPanelOpen(false);
         }}
-        onGodWhisper={(text) => {
-          godWhisper(text);
+        onGodWhisper={(params) => {
+          godWhisper(params);
           setPanelOpen(false);
         }}
+        currentScene={room?.current_scene}
+        sceneOptions={room?.scene_options}
       />
 
       <StatsPanel
@@ -754,39 +799,51 @@ export function RoomPage() {
                 </button>
               </div>
             </div>
-            <form className="scene-move-form" onSubmit={submitSceneMove}>
-              <input
-                value={sceneMoveText}
-                onChange={(e) => setSceneMoveText(e.target.value)}
-                placeholder="输入想去的场景"
-                maxLength={64}
-                disabled={aiBusy || status !== "open"}
-              />
-              <button
-                className="btn btn-sm"
-                type="submit"
-                disabled={aiBusy || status !== "open" || !sceneMoveText.trim()}
-              >
-                移动
-              </button>
-            </form>
+            <div className="scene-log-npc-avatars">
+              {(cards?.npcs ?? [])
+                .filter((n) => n.name !== "上帝" && n.name !== "旁白")
+                .map((n) => (
+                  <button
+                    key={n.id}
+                    className={`scene-npc-avatar ${n.scene === activeScene ? "active" : ""}`}
+                    title={`${n.name} · ${n.scene || "随队/当前场景"}`}
+                    onClick={() => {
+                      if (n.scene) setSelectedScene(n.scene);
+                    }}
+                  >
+                    {n.name.slice(0, 2)}
+                  </button>
+                ))}
+            </div>
             <div className="scene-log-body">
               <div className="scene-log-list">
                 {sceneLogScenes.map((s) => (
-                  <button
+                  <div
                     key={s}
                     className={`scene-log-tab ${s === activeScene ? "active" : ""}`}
-                    onClick={() => setSelectedScene(s)}
                   >
-                    <span>{s}</span>
-                    {s === sceneLog?.current_scene && <em>当前</em>}
-                  </button>
+                    <button
+                      type="button"
+                      className="scene-log-tab-main"
+                      onClick={() => setSelectedScene(s)}
+                    >
+                      <span>{s}</span>
+                      {s === sceneLog?.current_scene && <em>当前</em>}
+                    </button>
+                  </div>
                 ))}
               </div>
               <div className="scene-log-entries" ref={sceneLogEntriesRef}>
                 <div className="scene-log-title">
                   <strong>{activeScene}</strong>
                   {sceneLogLoading && <span>加载中…</span>}
+                </div>
+                <div className="scene-log-npcs">
+                  👥 {(cards?.npcs ?? [])
+                    .filter((n) => n.name !== "上帝")
+                    .filter((n) => !n.scene || n.scene === activeScene)
+                    .map((n) => n.name)
+                    .join("、") || "无"}
                 </div>
                 {activeSceneEntries.length > 0 ? (
                   activeSceneEntries.map((entry, idx) => (
@@ -838,6 +895,143 @@ export function RoomPage() {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {imageModalOpen && (
+        <div className="overlay-backdrop" onClick={() => setImageModalOpen(false)}>
+          <div className="move-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>📷 生成场景图</h3>
+            <label>动作描述</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="如：倒了一杯酒递给对方"
+              value={imageText}
+              onChange={(e) => setImageText(e.target.value)}
+              autoFocus
+            />
+            <label style={{ marginTop: 12 }}>出场角色（勾选要出场的角色）</label>
+            <div className="npc-checklist">
+              {cards?.players?.map((p) => (
+                <label key={p.user_id} className="npc-check-item">
+                  <input
+                    type="checkbox"
+                    checked={imageChars.has(p.character_name)}
+                    onChange={() => {
+                      const next = new Set(imageChars);
+                      if (next.has(p.character_name)) next.delete(p.character_name);
+                      else next.add(p.character_name);
+                      setImageChars(next);
+                    }}
+                  />
+                  {p.character_name}（我）
+                </label>
+              ))}
+              {(cards?.npcs ?? [])
+                .filter((n) => n.name !== "上帝")
+                .filter((n) => !n.scene || n.scene === room?.current_scene)
+                .map((n) => (
+                  <label key={n.id} className="npc-check-item">
+                    <input
+                      type="checkbox"
+                      checked={imageChars.has(n.name)}
+                      onChange={() => {
+                        const next = new Set(imageChars);
+                        if (next.has(n.name)) next.delete(n.name);
+                        else next.add(n.name);
+                        setImageChars(next);
+                      }}
+                    />
+                    {n.name}
+                  </label>
+                ))}
+            </div>
+            <div className="move-actions">
+              <button
+                className="btn"
+                disabled={imaging || (!imageText.trim() && imageChars.size === 0)}
+                onClick={() => {
+                  requestImage(imageText.trim(), [...imageChars]);
+                  setImageText("");
+                  setImageChars(new Set());
+                  setImageModalOpen(false);
+                }}
+              >
+                {imaging ? <><span className="spinner" />生成中</> : "生成"}
+              </button>
+              <button className="btn btn-ghost" onClick={() => { setImageModalOpen(false); setImageText(""); setImageChars(new Set()); }}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveModalOpen && (
+        <div className="overlay-backdrop" onClick={() => setMoveModalOpen(false)}>
+          <div className="move-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>🚶 移动</h3>
+            <label>目标场景</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="输入场景名"
+              value={moveScene}
+              onChange={(e) => setMoveScene(e.target.value)}
+            />
+            {room?.scene_options && room.scene_options.length > 0 && (
+              <div className="scene-options">
+                {room.scene_options.map((s) => (
+                  <button
+                    key={s}
+                    className={`btn btn-sm ${s === moveScene ? "active" : ""}`}
+                    onClick={() => setMoveScene(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+            <label style={{ marginTop: 12 }}>携带 NPC</label>
+            <div className="npc-checklist">
+              {(cards?.npcs ?? [])
+                .filter((n) => n.name !== "上帝")
+                .filter((n) => !n.scene || n.scene === room?.current_scene)
+                .map((n) => (
+                  <label key={n.id} className="npc-check-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedMoveNpcs.has(n.name)}
+                      onChange={() => {
+                        const next = new Set(selectedMoveNpcs);
+                        if (next.has(n.name)) next.delete(n.name);
+                        else next.add(n.name);
+                        setSelectedMoveNpcs(next);
+                      }}
+                    />
+                    {n.name}
+                  </label>
+                ))}
+            </div>
+            <div className="move-actions">
+              <button
+                className="btn"
+                disabled={!moveScene.trim()}
+                onClick={() => {
+                  moveNpcs(moveScene.trim(), [...selectedMoveNpcs]);
+                  setMoveModalOpen(false);
+                  setMoveScene("");
+                  setSelectedMoveNpcs(new Set());
+                }}
+              >
+                移动
+              </button>
+              <button className="btn btn-ghost" onClick={() => setMoveModalOpen(false)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

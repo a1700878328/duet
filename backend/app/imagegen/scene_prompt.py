@@ -13,12 +13,14 @@ from typing import Any
 
 _NSFW_PREFIX = "nsfw, explicit, adult"
 _SFW_PREFIX = "sfw"
-_FACE_ANCHOR = "colored eyelashes, jitome, smile, blush, open mouth, sweat"
-_CAMERA_ANCHOR = "cowboy shot, from side, looking at viewer"
+_FACE_ANCHOR = "colored eyelashes, half-closed eyes, faint smile, blush, parted lips"
 _BASE_NEGATIVE = (
     "worst quality, low quality, score_1, score_2, score_3, artist name, "
     "blurry, jpeg artifacts, lowres, censor, bad anatomy, bad hands, extra fingers, "
-    "extra limbs, watermark, signature, deformed face, asymmetrical eyes"
+    "extra limbs, watermark, signature, deformed face, asymmetrical eyes, "
+    "plain white background, blank background, empty background, studio backdrop, "
+    "front view, symmetrical composition, passport photo, id photo, straight-on, "
+    "wide open mouth, shouting, yelling"
 )
 _DUO_NEGATIVE_EXTRA = (
     ", duplicate character, unwanted crowd, extra person, third person, "
@@ -59,42 +61,103 @@ def _gender_tag(text: str) -> str:
     return "1girl"
 
 
-def _face_anchor_for(desc: str) -> str:
-    lower = desc.lower()
+def _face_anchor_for(desc: str, action_desc: str = "") -> str:
+    lower = f"{desc.lower()} {action_desc.lower()}"
     parts: list[str] = []
     if "colored eyelashes" not in lower:
         parts.append("colored eyelashes")
     if not any(
-        x in lower for x in ("jitome", "wide-eyed", "sharp eyes", "sleepy eyes")
+        x
+        in lower
+        for x in (
+            "jitome",
+            "wide-eyed",
+            "sharp eyes",
+            "sleepy eyes",
+            "half-closed eyes",
+        )
     ):
-        parts.append("jitome")
-    if not any(x in lower for x in ("smile", "expressionless", "angry", "crying")):
-        parts.append("smile")
+        parts.append("half-closed eyes")
+    if not any(x in lower for x in ("smile", "laughing", "cheerful")):
+        if any(
+            x in lower
+            for x in ("expressionless", "no smile", "serious", "angry", "crying")
+        ):
+            parts.append("expressionless")
+        else:
+            parts.append("faint smile")
     if "blush" not in lower:
         parts.append("blush")
-    if not any(x in lower for x in ("open mouth", "closed mouth", "parted lips")):
-        parts.append("open mouth")
-    if "sweat" not in lower:
-        parts.append("sweat")
+    if not any(
+        x in lower
+        for x in (
+            "open mouth",
+            "closed mouth",
+            "parted lips",
+            "small open mouth",
+        )
+    ):
+        parts.append("parted lips")
     return ", ".join(parts)
+
+
+def _location_background(scene_text: str) -> str:
+    if "冒险者公会" in scene_text or "公会" in scene_text:
+        return (
+            "adventurer guild hall interior, wooden reception counter, quest board, "
+            "warm lamplight, background adventurers, fantasy guild props"
+        )
+    if "酒馆" in scene_text:
+        return (
+            "fantasy tavern interior, wooden bar counter, tables, bottles, smoky warm "
+            "lamplight, lively background"
+        )
+    if "森林" in scene_text:
+        return (
+            "deep fantasy forest background, trees, moss, dappled sunlight, dirt path, "
+            "environmental depth"
+        )
+    if "洞窟" in scene_text or "洞穴" in scene_text:
+        return (
+            "dark cave interior, wet stone, crystals, torchlight, shadowy depth, "
+            "dungeon atmosphere"
+        )
+    if "借贷" in scene_text or "商店" in scene_text:
+        return (
+            "fantasy moneylender shop interior, counter, ledgers, coins, contract "
+            "papers, dim luxurious lighting"
+        )
+    if "青楼" in scene_text or "娼馆" in scene_text:
+        return (
+            "fantasy red-light district interior, red lanterns, silk curtains, ornate "
+            "wooden screens, warm moody lighting"
+        )
+    return "detailed fantasy environment background, cinematic depth, visible setting"
 
 
 def _scene_anchor(scene_text: str, *, two_person: bool) -> str:
     scene = _clean(scene_text, 260)
     if not scene:
-        scene = "simple roleplay scene, clear background"
-    shot = "medium shot" if two_person else _CAMERA_ANCHOR
+        scene = "roleplay scene with a visible fantasy environment"
+    shot = (
+        "medium two-shot, interactive composition"
+        if two_person
+        else "medium shot, character interacting with the environment"
+    )
+    background = _location_background(scene_text)
     return (
-        f"{shot}, simple background, cinematic anime lighting, clean anime line art, "
+        f"{shot}, {background}, cinematic anime lighting, clean anime line art, "
         f"polished cel shading, scene context: {scene}"
     )
 
 
-def _single_prompt(scene_text: str, appearances: list[str], *, nsfw: bool) -> str:
+def _single_prompt(
+    scene_text: str, appearances: list[str], *, nsfw: bool, action_desc: str = ""
+) -> str:
     name, desc = _split_character(appearances[0] if appearances else "")
     subject = _gender_tag(desc)
     identity = name or "original anime character"
-    face = _face_anchor_for(desc)
+    face = _face_anchor_for(desc, action_desc)
     parts = [
         _NSFW_PREFIX if nsfw else _SFW_PREFIX,
         subject,
@@ -102,15 +165,21 @@ def _single_prompt(scene_text: str, appearances: list[str], *, nsfw: bool) -> st
         identity,
         desc,
         face or _FACE_ANCHOR,
-        _scene_anchor(scene_text, two_person=False),
     ]
+    if action_desc:
+        parts.append(action_desc)
+    parts.append(_scene_anchor(scene_text, two_person=False))
     return ", ".join(p for p in parts if p)
 
 
-def _duo_prompt(scene_text: str, appearances: list[str], *, nsfw: bool) -> str:
+def _duo_prompt(
+    scene_text: str, appearances: list[str], *, nsfw: bool, action_desc: str = ""
+) -> str:
     chars = [_split_character(a) for a in appearances if _clean(a)][:4]
     if len(chars) < 2:
-        return _single_prompt(scene_text, appearances, nsfw=nsfw)
+        return _single_prompt(
+            scene_text, appearances, nsfw=nsfw, action_desc=action_desc
+        )
 
     count = len(chars)
     desc_blob = " ".join(desc for _, desc in chars)
@@ -132,7 +201,7 @@ def _duo_prompt(scene_text: str, appearances: list[str], *, nsfw: bool) -> str:
     for idx, (name, desc) in enumerate(chars):
         label = labels[idx] if idx < len(labels) else f"character {idx + 1}"
         identity = f"{label}, {name}" if name else label
-        face = _face_anchor_for(desc)
+        face = _face_anchor_for(desc, action_desc)
         parts.append(f"{identity}, {desc}, {face or _FACE_ANCHOR}")
 
     parts.extend(
@@ -144,10 +213,14 @@ def _duo_prompt(scene_text: str, appearances: list[str], *, nsfw: bool) -> str:
             "separate faces",
             "separate bodies",
             "clear character separation",
-            "standing close together" if count == 2 else "all characters visible",
-            _scene_anchor(scene_text, two_person=True),
         ]
     )
+    if action_desc:
+        parts.append(action_desc)
+    parts.append(
+        "standing close together" if count == 2 else "all characters visible",
+    )
+    parts.append(_scene_anchor(scene_text, two_person=True))
     return ", ".join(p for p in parts if p)
 
 
@@ -157,11 +230,12 @@ def build_scene_prompt_sync(
     *,
     nsfw: bool,
     two_person: bool,
+    action_desc: str = "",
 ) -> dict[str, str]:
     positive = (
-        _duo_prompt(scene_text, appearances, nsfw=nsfw)
+        _duo_prompt(scene_text, appearances, nsfw=nsfw, action_desc=action_desc)
         if two_person and len(appearances) >= 2
-        else _single_prompt(scene_text, appearances, nsfw=nsfw)
+        else _single_prompt(scene_text, appearances, nsfw=nsfw, action_desc=action_desc)
     )
     negative = _BASE_NEGATIVE
     if two_person and len(appearances) == 2:
@@ -177,6 +251,7 @@ async def build_scene_prompt(
     *,
     nsfw: bool,
     two_person: bool,
+    action_desc: str = "",
     brain: Any = None,
 ) -> dict[str, str]:
     """Build the deterministic Anima/NTRMix prompt.
@@ -189,4 +264,5 @@ async def build_scene_prompt(
         appearances,
         nsfw=nsfw,
         two_person=two_person,
+        action_desc=action_desc,
     )

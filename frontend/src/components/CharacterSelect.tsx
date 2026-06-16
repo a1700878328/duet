@@ -96,7 +96,11 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         persona: draft.persona,
         appearance: draft.appearance ?? null,
         voice_id: draft.voice_id ?? null,
+        voice_ref_url: draft.voice_ref_url ?? null,
+        voice_ref_text: draft.voice_ref_text ?? null,
+        voice_variants: draft.voice_variants ?? null,
         avatar_url: draft.avatar_url ?? null,
+        avatar_variants: draft.avatar_variants ?? null,
         reset_stats: true,
       });
       await onDone();
@@ -115,7 +119,11 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         persona: draft.persona,
         appearance: draft.appearance ?? null,
         voice_id: draft.voice_id ?? null,
+        voice_ref_url: draft.voice_ref_url ?? null,
+        voice_ref_text: draft.voice_ref_text ?? null,
+        voice_variants: draft.voice_variants ?? null,
         avatar_url: draft.avatar_url ?? null,
+        avatar_variants: draft.avatar_variants ?? null,
         reset_stats: true,
       });
       await onDone();
@@ -134,7 +142,11 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         persona: npc.persona,
         appearance: npc.appearance ?? null,
         voice_id: npc.voice_id ?? null,
+        voice_ref_url: npc.voice_ref_url ?? null,
+        voice_ref_text: npc.voice_ref_text ?? null,
+        voice_variants: npc.voice_variants ?? null,
         avatar_url: npc.avatar_url ?? null,
+        avatar_variants: npc.avatar_variants ?? null,
         reset_stats: true,
       });
       await api.setNpcActive(roomId, npc.id, false);
@@ -156,7 +168,9 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         voice_id: card.voice_id ?? null,
         voice_ref_url: card.voice_ref_url ?? null,
         voice_ref_text: card.voice_ref_text ?? null,
+        voice_variants: card.voice_variants ?? null,
         avatar_url: card.avatar_url ?? null,
+        avatar_variants: card.avatar_variants ?? null,
         reset_stats: true,
       });
       await onDone();
@@ -288,7 +302,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                         loading="lazy"
                       />
                     ) : (
-                      <div className="char-card-noart muted">（生成中…）</div>
+                      <div className="char-card-noart muted">（暂无默认立绘）</div>
                     )}
                   </div>
                 )}
@@ -324,11 +338,30 @@ export function CharacterSelect({ roomId, onDone }: Props) {
           <section className="char-select-section">
             <div className="char-select-section-head">
               <h3>世界角色</h3>
-              <span className="muted">来自当前世界卡的重要 NPC</span>
+              <span className="muted">
+                来自当前世界卡的重要 NPC · 共 {presetCharacters.length} 个
+              </span>
             </div>
-            <div className="char-select-grid text-only">
+            <div
+              className={`char-select-grid ${
+                MEDIA_GENERATION_ENABLED ? "" : "text-only"
+              }`}
+            >
               {presetCharacters.map((npc) => (
                 <div className="char-card" key={npc.id}>
+                  {MEDIA_GENERATION_ENABLED && (
+                    <div className="char-card-portrait">
+                      {npc.avatar_url ? (
+                        <img
+                          src={assetUrl(npc.avatar_url)}
+                          alt={npc.name}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="char-card-noart muted">（暂无默认立绘）</div>
+                      )}
+                    </div>
+                  )}
                   <div className="char-card-body">
                     <div className="char-card-name">
                       {npc.name}

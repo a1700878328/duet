@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -35,6 +36,7 @@ from .lore import store as lore_store
 from .memory import store as memory_store
 from .models import Message, NpcCard, Room, RoomMember, User
 from .npc_decision import judge_npc_impulse
+from .preset_assets import apply_preset_assets
 from .prompts import (
     build_npc_system_prompt,
     build_system_prompt,
@@ -50,7 +52,8 @@ from .scene_logs import (
 )
 from .scene_movement import (
     infer_npc_moves_from_text,
-    parse_scene_simulation_output,
+    infer_player_escort_moves_from_text,
+    parse_scene_simulation_plan,
 )
 from .schemas import MessageOut
 from .security import user_from_token
@@ -82,7 +85,7 @@ from .timeflow import (
     split_time_index,
     time_label,
 )
-from .world_presets import scene_options
+from .world_presets import alternate_form_base_name, scene_options
 
 router = APIRouter()
 
@@ -198,14 +201,30 @@ def _chunks(text: str, size: int = 12):
         yield text[i : i + size]
 
 
-def _extract_speaker_label(content: str, fallback: str) -> tuple[str, str]:
-    """Promote a leading [speaker]: prefix into the persisted speaker label."""
+_SPEAKER_PREFIX_RE = re.compile(
+    r"^\s*(?:"
+    r"[\[【「『]([^\]\n】」』：:]{1,40})[\]】」』]"
+    r"|([^\s\[\]【】「」『』\n:：（）()，,。！？!?、]{1,40})"
+    r")\s*(?:[（(][^）)\n]{0,120}[）)])?\s*[:：]\s*(.*)$",
+    re.DOTALL,
+)
+
+
+def _split_speaker_prefix(content: str | None) -> tuple[str | None, str]:
     text = (content or "").strip()
-    match = re.match(r"^\s*\[([^\]\n]{1,24})\]\s*[:：]\s*(.*)$", text, re.DOTALL)
+    match = _SPEAKER_PREFIX_RE.match(text)
     if not match:
+        return None, text
+    label = (match.group(1) or match.group(2) or "").strip()
+    return label or None, match.group(3).strip()
+
+
+def _extract_speaker_label(content: str, fallback: str) -> tuple[str, str]:
+    """Promote a leading speaker prefix into the persisted speaker label."""
+    text = (content or "").strip()
+    label, body = _split_speaker_prefix(content)
+    if not label:
         return fallback, text
-    label = match.group(1).strip()
-    body = match.group(2).strip()
     if not label or label.upper() in {"NPC", "AI"}:
         return fallback, body or text
     return label, body or text
@@ -216,16 +235,93 @@ def _norm_label(label: str | None) -> str:
 
 
 def _leading_speaker_label(content: str) -> str | None:
-    match = re.match(r"^\s*\[([^\]\n]{1,24})\]\s*[:：]", content or "", re.DOTALL)
-    return match.group(1).strip() if match else None
+    label, _body = _split_speaker_prefix(content)
+    return label
 
 
 def _has_wrong_required_speaker(content: str, required_label: str | None) -> bool:
     """For single-NPC turns, any explicit non-target label is a hard violation."""
     if not required_label:
         return False
-    label = _leading_speaker_label(content)
-    return label is not None and _norm_label(label) != _norm_label(required_label)
+    label, body = _split_speaker_prefix(content)
+    if label is None:
+        return False
+    if _norm_label(label) != _norm_label(required_label):
+        return True
+    nested_label, _nested_body = _split_speaker_prefix(body)
+    return nested_label is not None and _norm_label(nested_label) != _norm_label(
+        required_label
+    )
+
+
+def _strip_required_speaker_prefix(content: str, required_label: str) -> str:
+    """Drop one or more leading labels for the required NPC before persisting."""
+    text = (content or "").strip()
+    for _ in range(2):
+        label, body = _split_speaker_prefix(text)
+        if label is None or _norm_label(label) != _norm_label(required_label):
+            break
+        text = body.strip()
+    return text
+
+
+_NARRATION_REQUEST_RE = re.compile(
+    r"\[\[\s*(?:旁白请求|旁白|narration_request)\s*[:：]\s*(.*?)\s*\]\]",
+    re.DOTALL | re.IGNORECASE,
+)
+_ROLE_LEAK_VERBS = (
+    "放下|站起|抬起|看向|望向|走到|绕过|俯身|伸手|退后|笑|挑眉|眯眼|"
+    "低声|问道|说道|开口|咳嗽|擦剑|敲了|压低|凑近|靠近|转身"
+)
+
+
+def _extract_narration_requests(content: str) -> tuple[str, list[str]]:
+    requests = [
+        re.sub(r"\s+", " ", m.group(1)).strip()[:180]
+        for m in _NARRATION_REQUEST_RE.finditer(content or "")
+    ]
+    clean = _NARRATION_REQUEST_RE.sub("", content or "").strip()
+    return clean, [r for r in requests if r]
+
+
+def _npc_aliases_for_dialogue_guard(name: str) -> list[str]:
+    aliases = [name]
+    if "会长" in name:
+        aliases.append("会长")
+    if "教官" in name:
+        aliases.append("教官")
+    if "商人" in name:
+        aliases.append("商人")
+    return [a for a in dict.fromkeys(aliases) if a]
+
+
+def _looks_like_npc_narration_leak(
+    content: str,
+    *,
+    npc_name: str,
+    forbidden_names: list[str],
+) -> bool:
+    """Detect a target-NPC line that is actually third-person narration."""
+    text = (content or "").strip()
+    if not text:
+        return False
+    first = text.split("\n", 1)[0][:260]
+    names: list[str] = []
+    for name in [*forbidden_names, npc_name]:
+        names.extend(_npc_aliases_for_dialogue_guard(name))
+    for name in names:
+        compact = (name or "").strip()
+        if not compact:
+            continue
+        pattern = rf"{re.escape(compact)}[^。！？!?；;\n]{{0,36}}(?:{_ROLE_LEAK_VERBS})"
+        if re.search(pattern, first):
+            return True
+    if re.search(r"^[她他][^。！？!?；;\n]{0,36}(?:" + _ROLE_LEAK_VERBS + ")", first):
+        return True
+    return bool(
+        re.search(r"[^。！？!?；;\n]{0,48}[“\"].{0,80}[”\"]", first)
+        and any(name and name in first for name in forbidden_names)
+    )
 
 
 def _narration_body(content: str | None) -> str:
@@ -362,7 +458,22 @@ async def _broadcast_narration(
     )
     await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
     await _record_scene_log(coord, None, "旁白", body, kind="narration")
+    await _apply_player_escort_from_text(
+        coord,
+        body,
+        reason="旁白带路",
+    )
     return msg
+
+
+async def _broadcast_scene_npcs(coord: RoomCoordinator, scene: str) -> None:
+    """广播当前场景的 NPC 列表。"""
+    npcs = await _scene_npcs(coord, scene)
+    names = [n.name for n in npcs if n.name != "上帝"]
+    if names:
+        await _broadcast_system(
+            coord, f"📍 当前场景「{scene}」角色：{'、'.join(names[:10])}"
+        )
 
 
 async def _broadcast_system(coord: RoomCoordinator, content: str) -> Message:
@@ -779,6 +890,139 @@ async def _apply_npc_scene_moves(
         await _record_scene_log(coord, dest, "NPC移动", text, kind="npc_move")
 
 
+async def _apply_player_escort_from_text(
+    coord: RoomCoordinator,
+    content: str,
+    *,
+    source_scene: str | None = None,
+    npc_names: list[str] | None = None,
+    reason: str,
+) -> str:
+    """If prose says an NPC brings the player elsewhere, sync room + NPC scene."""
+    if source_scene is None or npc_names is None:
+        async with SessionFactory() as session:
+            room = await session.get(Room, coord.room_id)
+            if room is None:
+                return source_scene or ""
+            source_scene = await ensure_room_scene(session, room)
+            npc_names = list(
+                await session.scalars(
+                    select(NpcCard.name).where(
+                        NpcCard.room_id == coord.room_id,
+                        NpcCard.active.is_(True),
+                    )
+                )
+            )
+
+    moves = infer_player_escort_moves_from_text(
+        content,
+        npc_names or [],
+        source_scene=source_scene or "",
+    )
+    if not moves:
+        return source_scene or ""
+
+    await _apply_npc_scene_moves(coord, source_scene or "", moves, reason=reason)
+    for move in reversed(moves):
+        npc_name = (move.get("npc") or "NPC").strip()
+        dest = (move.get("scene") or "").strip()[:64]
+        if dest and dest != (source_scene or ""):
+            return await _auto_switch_scene(
+                coord,
+                dest,
+                f"{npc_name}带你前往{dest}",
+                advance_steps=0,
+            )
+    return source_scene or ""
+
+
+async def _apply_scene_discoveries(
+    coord: RoomCoordinator,
+    source_scene: str,
+    *,
+    unlock_scenes: list[str],
+    introduce_npcs: list[dict[str, str]],
+    reason: str,
+) -> None:
+    """Apply sandbox discoveries: unlocked scenes and NPCs found offscreen."""
+    cleaned_scenes: list[str] = []
+    for scene_name in unlock_scenes:
+        scene = (scene_name or "").strip()[:64]
+        if scene and scene not in cleaned_scenes:
+            cleaned_scenes.append(scene)
+
+    introduced_logs: list[tuple[str, str]] = []
+    unlocked_logs: list[str] = []
+    changed = False
+    async with SessionFactory() as session:
+        room = await session.get(Room, coord.room_id)
+        if room is None:
+            return
+        meta = _load_scene_meta(room.scenes_meta)
+        unlocked = meta.get("_unlocked_scenes")
+        if not isinstance(unlocked, list):
+            unlocked = []
+        for scene in cleaned_scenes:
+            if scene not in unlocked:
+                unlocked.append(scene)
+                unlocked_logs.append(scene)
+                changed = True
+
+        for draft in introduce_npcs:
+            name = (draft.get("name") or "").strip()
+            persona = (draft.get("persona") or "").strip()
+            if not name or not persona:
+                continue
+            target_scene = (draft.get("scene") or source_scene or "").strip()[:64]
+            npc_draft = {k: v for k, v in draft.items() if k != "scene"}
+            try:
+                npc = await _upsert_introduced_npc(
+                    session,
+                    room_id=coord.room_id,
+                    world_card=room.world_card,
+                    draft=npc_draft,
+                    scene=target_scene,
+                )
+                await session.flush()
+            except Exception as exc:  # noqa: BLE001 — sandbox discovery is optional
+                print(
+                    f"[OFFSCREEN-DISCOVERY] room={coord.room_id} "
+                    f"source={source_scene} npc={name} error={exc}",
+                    flush=True,
+                )
+                continue
+            actual_scene = (npc.scene or target_scene or source_scene or "").strip()
+            if actual_scene and actual_scene not in unlocked:
+                unlocked.append(actual_scene)
+                unlocked_logs.append(actual_scene)
+            introduced_logs.append((npc.name, actual_scene or source_scene))
+            changed = True
+
+        if not changed:
+            return
+        meta["_unlocked_scenes"] = unlocked
+        room.scenes_meta = json.dumps(meta, ensure_ascii=False)
+        await session.commit()
+
+    await coord.broadcast({"type": "cards_changed"})
+    for scene in unlocked_logs:
+        await _record_scene_log(
+            coord,
+            scene,
+            "场景解锁",
+            f"{scene} 被 NPC 离屏行动发现/带入可探索范围（{reason}）。",
+            kind="scene_unlock",
+        )
+    for npc_name, scene in introduced_logs:
+        await _record_scene_log(
+            coord,
+            scene,
+            "NPC出现",
+            f"{npc_name} 因 {reason} 进入模拟，可在「{scene or '自由场景'}」遇见。",
+            kind="npc_introduced",
+        )
+
+
 def _time_label_from_index(index: int, world_card: str | None = None) -> str:
     day, slot = split_time_index(index)
     return time_label((day - 1) // 7 + 1, day, slot, world_card=world_card)
@@ -895,8 +1139,14 @@ async def _show_scene_elapsed_simulation(
                             "按 NPC 个体写 1-3 句摘要，可包含 NPC 之间的互动。"
                             "不要推进玩家行动，不要写正式对话台词。"
                             '只输出 JSON：{"text":"给开发者看的场景记录",'
-                            '"moves":[{"npc":"NPC名","scene":"目标场景"}]}。'
+                            '"moves":[{"npc":"NPC名","scene":"目标场景"}],'
+                            '"unlock_scenes":["新场景名"],'
+                            '"introduce_npcs":[{"name":"NPC名","persona":"人设",'
+                            '"appearance":"long hair, blue eyes",'
+                            '"scene":"所在场景"}]}。'
                             "只有 NPC 明确离开本场景前往别处时才写 moves；"
+                            "只有 NPC 的行动合理带出新地点/新人物时才写 "
+                            "unlock_scenes/introduce_npcs；"
                             "否则 moves=[]。"
                         ),
                     },
@@ -918,11 +1168,12 @@ async def _show_scene_elapsed_simulation(
         ).strip()
     except Exception:
         raw = ""
-    text, moves = parse_scene_simulation_output(
+    plan = parse_scene_simulation_plan(
         raw,
         [n.name for n in npcs],
         source_scene=scene,
     )
+    text, moves = plan.text, plan.moves
     if not text:
         text = "；".join(f"{n.name}在离屏时间里维持自己的安排。" for n in npcs)
     await _record_scene_log(coord, scene, "离屏行动", text, kind="offscreen")
@@ -930,6 +1181,13 @@ async def _show_scene_elapsed_simulation(
         coord,
         scene,
         moves,
+        reason="离屏行动",
+    )
+    await _apply_scene_discoveries(
+        coord,
+        scene,
+        unlock_scenes=plan.unlock_scenes,
+        introduce_npcs=plan.introduce_npcs,
         reason="离屏行动",
     )
     await _broadcast_system(
@@ -1097,6 +1355,124 @@ def _media_url_to_path(url: str | None) -> str | None:
     return str(path) if path.exists() else None
 
 
+def _compact_match_text(text: str | None) -> str:
+    compacted = re.sub(
+        r"[\s　，,。！？!?、:：；;（）()\[\]【】「」『』]+",
+        "",
+        text or "",
+    )
+    return compacted.lower()
+
+
+def _scene_name_aliases(name: str) -> list[str]:
+    aliases = [name]
+    if "会长" in name:
+        aliases.extend(["会长", "公会会长", "魅魔会长"])
+    if name == "哥布林法师":
+        aliases.extend(["法师", "哥布林法师"])
+    if name == "酒馆老板娘":
+        aliases.extend(["老板娘"])
+    if name == "借贷商人":
+        aliases.extend(["商人", "借贷商"])
+    return [a for a in dict.fromkeys(aliases) if a]
+
+
+def _mentioned_scene_names(text: str | None, names: list[str]) -> list[str]:
+    compact = _compact_match_text(text)
+    if not compact:
+        return []
+    hits: list[tuple[int, str]] = []
+    for name in names:
+        positions = [
+            compact.find(_compact_match_text(alias))
+            for alias in _scene_name_aliases(name)
+            if _compact_match_text(alias)
+        ]
+        positions = [pos for pos in positions if pos >= 0]
+        if positions:
+            hits.append((min(positions), name))
+    hits.sort(key=lambda item: item[0])
+    return [name for _pos, name in hits]
+
+
+def _npc_inner_vote_target(content: str | None, npc_names: list[str]) -> str | None:
+    text = content or ""
+    if "NPC内心" not in text or "想发言：是" not in text:
+        return None
+    head = text.split("\n", 1)[0]
+    parts = [p.strip() for p in head.split("｜") if p.strip()]
+    if parts:
+        candidate = parts[-1]
+        if candidate in npc_names:
+            return candidate
+    for name in npc_names:
+        if name in text:
+            return name
+    return None
+
+
+def _scene_image_characters(
+    history: list[Message],
+    *,
+    member_names: list[str],
+    npc_names: list[str],
+    look: dict[str, str],
+) -> list[str]:
+    selected: list[str] = []
+
+    def add(name: str | None) -> None:
+        if name and name in look and name not in selected:
+            selected.append(name)
+
+    latest_player = next(
+        (
+            msg
+            for msg in reversed(history)
+            if msg.author_type == "user" and msg.speaker_label in member_names
+        ),
+        None,
+    )
+    latest_player_name = latest_player.speaker_label if latest_player else None
+
+    if latest_player is not None:
+        direct_npcs = _mentioned_scene_names(latest_player.content, npc_names)
+        if direct_npcs:
+            add(latest_player_name)
+            for name in direct_npcs[:2]:
+                add(name)
+            return selected[:2]
+
+    for msg in reversed(history[-8:]):
+        target = _npc_inner_vote_target(msg.content, npc_names)
+        if target:
+            add(latest_player_name)
+            add(target)
+            return selected[:2]
+
+    for msg in reversed(history[-8:]):
+        if msg.author_type == "ai" and msg.speaker_label in npc_names:
+            add(latest_player_name)
+            add(msg.speaker_label)
+            return selected[:2]
+        if msg.author_type == "ai" and msg.speaker_label == "旁白":
+            narrated_npcs = _mentioned_scene_names(msg.content, npc_names)
+            if narrated_npcs:
+                add(latest_player_name)
+                add(narrated_npcs[0])
+                return selected[:2]
+
+    for msg in reversed(history[-8:]):
+        if (
+            msg.author_type in {"user", "ai"}
+            and msg.speaker_label in look
+            and msg.speaker_label not in {"旁白", "AI"}
+        ):
+            add(msg.speaker_label)
+        if len(selected) >= 2:
+            break
+    return selected[:2]
+
+
 async def _generate_guarded(
     messages: list[dict[str, str]],
     forbidden: list[str],
@@ -1154,6 +1530,54 @@ async def _generate_guarded(
     return clean, info
 
 
+async def _rewrite_npc_dialogue_if_needed(
+    *,
+    coord: RoomCoordinator,
+    messages: list[dict[str, str]],
+    content: str,
+    npc: NpcCard,
+    forbidden: list[str],
+) -> str:
+    if not _looks_like_npc_narration_leak(
+        content,
+        npc_name=npc.name,
+        forbidden_names=forbidden,
+    ):
+        return content
+    print(
+        f"[DIALOGUE-GUARD] room={coord.room_id} npc={npc.name} rewrite=1",
+        flush=True,
+    )
+    corrective = messages + [
+        {"role": "assistant", "content": f"[{npc.name}]: {content}"},
+        {
+            "role": "system",
+            "content": (
+                f"你刚才把「{npc.name}」的专属回合写成了场景旁白或其他角色动作。"
+                f"请重写为「{npc.name}」本人实际说出口的话。"
+                "只允许括号描写自己的动作；不要描写其他角色动作、心理、表情，"
+                "不要替其他角色写台词。需要场景画面时，在末尾写隐藏标记 "
+                "[[旁白请求:一句话说明要补的画面]]。"
+            ),
+        },
+    ]
+    try:
+        clean, _guard = await _generate_guarded(
+            corrective,
+            forbidden,
+            required_label=npc.name,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[DIALOGUE-GUARD] room={coord.room_id} npc={npc.name} "
+            f"rewrite_failed={type(exc).__name__}: {str(exc)[:300]}",
+            flush=True,
+        )
+        return content
+    rewritten = _strip_required_speaker_prefix(clean, npc.name)
+    return rewritten or content
+
+
 async def _run_ai_turn(
     coord: RoomCoordinator,
     npc: NpcCard | None = None,
@@ -1198,8 +1622,7 @@ async def _run_ai_turn(
         {
             "role": "system",
             "content": (
-                f"当前时间：{clock_label}\n"
-                f"当前场景：{current_scene or '自由场景'}"
+                f"当前时间：{clock_label}\n当前场景：{current_scene or '自由场景'}"
             ),
         },
     )
@@ -1274,6 +1697,12 @@ async def _run_ai_turn(
     except Exception as exc:  # noqa: BLE001 — surface as a room error, keep serving
         finish_reason = "error"
         content = ""
+        print(
+            f"[AI-TURN] room={coord.room_id} "
+            f"speaker={npc.name if npc is not None else ai_label} "
+            f"error={type(exc).__name__}: {str(exc)[:500]}",
+            flush=True,
+        )
         await coord.broadcast({"type": "error", "code": "ai_error", "detail": str(exc)})
 
     if not content:
@@ -1289,7 +1718,22 @@ async def _run_ai_turn(
             flush=True,
         )
 
-    ai_label, content = _extract_speaker_label(content, ai_label)
+    narration_requests: list[str] = []
+    if npc is not None:
+        ai_label = npc.name
+        content = _strip_required_speaker_prefix(content, npc.name)
+        content = await _rewrite_npc_dialogue_if_needed(
+            coord=coord,
+            messages=messages,
+            content=content,
+            npc=npc,
+            forbidden=forbidden,
+        )
+        content, narration_requests = _extract_narration_requests(content)
+        if not content:
+            content = "（……）"
+    else:
+        ai_label, content = _extract_speaker_label(content, ai_label)
     content = await _handle_ai_give_directives(
         coord,
         speaker_label=ai_label,
@@ -1305,16 +1749,12 @@ async def _run_ai_turn(
         author_user_id=None,
     )
     await _record_scene_log(coord, current_scene, ai_label, content, kind="ai")
+    escort_moves: list[dict[str, str]] = []
     if npc is not None:
-        await _apply_npc_scene_moves(
-            coord,
-            current_scene,
-            infer_npc_moves_from_text(
-                content,
-                [npc.name],
-                source_scene=current_scene,
-            ),
-            reason="NPC发言",
+        escort_moves = infer_player_escort_moves_from_text(
+            content,
+            [npc.name],
+            source_scene=current_scene,
         )
     for chunk in _chunks(content):
         await coord.broadcast(
@@ -1337,6 +1777,16 @@ async def _run_ai_turn(
             "finish_reason": finish_reason,
         }
     )
+    if npc is not None and escort_moves:
+        current_scene = await _apply_player_escort_from_text(
+            coord,
+            content,
+            source_scene=current_scene,
+            npc_names=[npc.name],
+            reason="NPC带路",
+        )
+    for request in narration_requests[:2]:
+        await _broadcast_narration(coord, request)
 
     # 后台写入长期记忆（best-effort，不挡主路）：让 mem0 从本回合抽取耐久事实。
     last_user = next(
@@ -1530,11 +1980,15 @@ async def _handle_polish_say(
 
 
 async def _handle_god_whisper(
-    websocket: WebSocket, coord: RoomCoordinator, user: User, content: str
+    websocket: WebSocket, coord: RoomCoordinator, user: User, payload: dict[str, Any]
 ) -> None:
     """Private God command: rewrite current-scene NPC intent without timeline chat."""
-    content = (content or "").strip()
-    if not content:
+    # 结构化模式 vs 旧版自由文本
+    target_name = str(payload.get("target_npc") or "").strip()
+    dest_scene = str(payload.get("scene") or "").strip()
+    action = str(payload.get("action") or "").strip()
+    content = str(payload.get("content") or "").strip()
+    if not target_name and not content:
         return
     if coord.ai_busy:
         await coord.broadcast(
@@ -1567,44 +2021,62 @@ async def _handle_god_whisper(
                 )
                 or "- （当前场景没有明确 NPC）"
             )
-        try:
-            raw = await brain.complete(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是上帝视角的暗中导演。玩家私聊给你的指令会强制影响"
-                            "当前场景 NPC 的下一步行动、动机、站位或关系变化。"
-                            "不要写成玩家公开发言，不要让 NPC 知道这是玩家下令。"
-                            '只输出 JSON：{"text":"给玩家看的上帝私聊确认，1句",'
-                            '"target_npc":"被强制影响且应立刻行动的当前场景 NPC 名，'
-                            '没有则为 null",'
-                            '"narration":"写入场景记录的暗中影响摘要，1-3句",'
-                            '"moves":[{"npc":"NPC名","scene":"目标场景"}]}。'
-                            "只有需要 NPC 换场景时才写 moves，否则 moves=[]。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"当前场景：{current_scene or '自由场景'}\n"
-                            f"当前 NPC：\n{npc_lines}\n\n"
-                            f"玩家私聊上帝的指令：{content}"
-                        ),
-                    },
-                ]
+        confirm: str
+        narration: str
+        directive: str
+        moves: list[dict[str, str]] = []
+        if target_name:
+            # 结构化模式：前端已选好目标 NPC / 场景 / 动作
+            confirm = f"上帝意志已压入「{target_name}」"
+            if dest_scene:
+                moves = [{"npc": target_name, "scene": dest_scene}]
+                confirm += f"，目标场景：{dest_scene}"
+            narration = action or content or "上帝施加了暗中影响"
+            directive = action or content or "执行上帝的意志"
+            if dest_scene:
+                confirm += f"，前往{dest_scene}"
+        else:
+            # 旧版自由文本模式：AI 解析 JSON
+            try:
+                raw = await brain.complete(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是上帝视角的暗中导演。玩家私聊给你的指令会强制影响"
+                                "当前场景 NPC 的下一步行动、动机、站位或关系变化。"
+                                "不要写成玩家公开发言，不要让 NPC 知道这是玩家下令。"
+                                '只输出 JSON：{"text":"给玩家看的上帝私聊确认，1句",'
+                                '"target_npc":"被强制影响且应立刻行动的当前场景 NPC 名'
+                                '，没有则为 null",'
+                                '"narration":"写入场景记录的暗中影响摘要，1-3句",'
+                                '"moves":[{"npc":"NPC名","scene":"目标场景"}]}。'
+                                "只有需要 NPC 换场景时才写 moves，否则 moves=[]。"
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"当前场景：{current_scene or '自由场景'}\n"
+                                f"当前 NPC：\n{npc_lines}\n\n"
+                                f"玩家私聊上帝的指令：{content}"
+                            ),
+                        },
+                    ]
+                )
+                ai_data = parse_json_object(raw)
+            except Exception:
+                ai_data = {}
+            confirm = str(
+                ai_data.get("text") or "上帝已经把这道意志压进当前场景。"
+            ).strip()
+            target_name = str(ai_data.get("target_npc") or "").strip()
+            narration = str(ai_data.get("narration") or content).strip()
+            directive = (
+                content if not narration else f"{content}\n（暗中整理：{narration}）"
             )
-            data = parse_json_object(raw)
-        except Exception:
-            data = {}
-        confirm = str(data.get("text") or "上帝已经把这道意志压进当前场景。").strip()
-        target_name = str(data.get("target_npc") or "").strip()
-        narration = str(data.get("narration") or content).strip()
-        directive = (
-            content if not narration else f"{content}\n（暗中整理：{narration}）"
-        )
-        moves_raw = data.get("moves") if isinstance(data, dict) else []
-        moves = moves_raw if isinstance(moves_raw, list) else []
+            moves_raw = ai_data.get("moves") if isinstance(ai_data, dict) else []
+            moves = moves_raw if isinstance(moves_raw, list) else []
         await websocket.send_json(
             {"type": "god_reply", "content": confirm[:500], "private_to": user.id}
         )
@@ -1633,7 +2105,8 @@ async def _handle_god_whisper(
                 None,
             )
         if target_npc is None:
-            content_norm = content.replace(" ", "").replace("　", "").lower()
+            _content = content or action or ""
+            content_norm = _content.replace(" ", "").replace("　", "").lower()
             target_npc = next(
                 (
                     n
@@ -1651,7 +2124,8 @@ async def _handle_god_whisper(
                 (
                     f"🧠 NPC内心｜{mind_time}｜"
                     f"{current_scene or '自由场景'}｜{target_npc.name}\n"
-                    f"想发言：是｜紧迫度：5/5｜理由：上帝私聊强制影响：{content[:180]}"
+                    "想发言：是｜紧迫度：5/5｜理由：上帝私聊强制影响："
+                    f"{(action or content)[:180]}"
                 ),
             )
             await _run_ai_turn(
@@ -1788,7 +2262,10 @@ async def _handle_pay_npc(
                 ]
             )
             response, _violated = sanitize(response, [player_name, *other_npc_names])
-            _label, response = _extract_speaker_label(response, npc_name)
+            if _has_wrong_required_speaker(response, npc_name):
+                response = ""
+            else:
+                response = _strip_required_speaker_prefix(response, npc_name)
         except Exception:  # noqa: BLE001
             response = ""
         response = response.strip() or f"{npc_name}收下了 {amount} 银币。"
@@ -1889,6 +2366,21 @@ async def _handle_advance(coord: RoomCoordinator, npc: NpcCard | None = None) ->
             await _run_world_event_judge_only(coord)
     finally:
         await _set_ai_busy(coord, False)
+
+
+async def _resolve_advance_npc(room_id: int, npc_id_raw: Any) -> NpcCard | None:
+    """Only persisted, active room NPCs can be forced to speak."""
+    try:
+        npc_id = int(npc_id_raw)
+    except (TypeError, ValueError):
+        return None
+    if npc_id <= 0:
+        return None
+    async with SessionFactory() as session:
+        npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id or not npc.active:
+        return None
+    return npc
 
 
 def _player_state_summary(members: list[RoomMember]) -> str:
@@ -2168,6 +2660,7 @@ async def _advance_time(coord: RoomCoordinator, steps: int, reason: str) -> None
     """Advance the room clock by day phases and broadcast the visible clock."""
     settlements: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
     imprison_effects: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+    find_effects: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
     endings: list[tuple[int, str]] = []
     old_label = ""
     new_label = ""
@@ -2273,11 +2766,24 @@ async def _advance_time(coord: RoomCoordinator, steps: int, reason: str) -> None
                 for m in members:
                     cur = json.loads(m.stats) if m.stats else default_stats()
                     items = cur.get("物品") or []
+                    gained: list[str] = []
                     for _ in range(quantity):
                         items.append(item_name)
+                        gained.append(item_name)
                     cur["物品"] = items
                     m.stats = json.dumps(cur, ensure_ascii=False)
+                    if gained:
+                        find_effects.append((m.user_id, cur, {"物品_add": gained}))
                 await session.commit()
+            for uid, new_stats, delta in find_effects:
+                await coord.broadcast(
+                    {
+                        "type": "stats",
+                        "user_id": uid,
+                        "stats": new_stats,
+                        "delta": delta,
+                    }
+                )
             await _broadcast_system(coord, f"🎒 {event_text}")
         else:
             await _broadcast_system(coord, event_text)
@@ -2403,7 +2909,6 @@ async def _auto_switch_scene(
         if not isinstance(initialized, list):
             initialized = []
         was_initialized = dest in initialized
-        dest_last_seen = last_seen.get(dest)
         room.current_scene = dest
         room.scenes_meta = json.dumps(meta, ensure_ascii=False)
         await session.commit()
@@ -2414,6 +2919,7 @@ async def _auto_switch_scene(
         coord,
         f"📍 自动场景变化｜{old or '自由场景'} → {dest}（{reason or '剧情自然转场'}）",
     )
+    await _broadcast_scene_npcs(coord, dest)
     await _record_scene_log(
         coord,
         dest,
@@ -2431,15 +2937,12 @@ async def _auto_switch_scene(
 
     async with SessionFactory() as session:
         room = await session.get(Room, coord.room_id)
-        now_index = room_time(room).index if room is not None else 0
         meta = _load_scene_meta(room.scenes_meta if room is not None else None)
         initialized = meta.get("_scene_initialized")
         if not isinstance(initialized, list):
             initialized = []
 
-    dest_npcs = await _scene_npcs(coord, dest)
     if not was_initialized:
-        await _show_scene_initialization(coord, dest, dest_npcs)
         if dest not in initialized:
             initialized.append(dest)
         async with SessionFactory() as session:
@@ -2449,14 +2952,6 @@ async def _auto_switch_scene(
                 meta["_scene_initialized"] = initialized
                 room.scenes_meta = json.dumps(meta, ensure_ascii=False)
                 await session.commit()
-    elif dest_last_seen is not None:
-        try:
-            gap_start = int(dest_last_seen)
-        except (TypeError, ValueError):
-            gap_start = now_index
-        await _show_scene_elapsed_simulation(
-            coord, dest, dest_npcs, gap_start, now_index
-        )
 
     asyncio.create_task(
         asyncio.to_thread(
@@ -2467,6 +2962,141 @@ async def _auto_switch_scene(
         )
     )
     return dest
+
+
+def _set_npc_avatar_variant(
+    npc: NpcCard, url: str | None, *, label: str, source: str
+) -> None:
+    if not url:
+        return
+    try:
+        raw = json.loads(npc.avatar_variants or "[]")
+    except Exception:
+        raw = []
+    variants: list[dict[str, str]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            old_url = str(item.get("url") or "").strip()
+            if not old_url or old_url in seen:
+                continue
+            variant = {"url": old_url}
+            for field in ("label", "source", "created_at"):
+                val = str(item.get(field) or "").strip()
+                if val:
+                    variant[field] = val
+            variants.append(variant)
+            seen.add(old_url)
+    if npc.avatar_url and npc.avatar_url not in seen:
+        variants.append(
+            {"url": npc.avatar_url, "label": "旧形态头像", "source": "previous"}
+        )
+        seen.add(npc.avatar_url)
+    if url not in seen:
+        variants.insert(
+            0,
+            {
+                "url": url,
+                "label": label,
+                "source": source,
+                "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            },
+        )
+    npc.avatar_url = url
+    npc.avatar_variants = json.dumps(variants, ensure_ascii=False)
+
+
+async def _upsert_introduced_npc(
+    session,
+    *,
+    room_id: int,
+    world_card: str | None,
+    draft: dict[str, Any],
+    scene: str,
+) -> NpcCard:
+    enriched = apply_preset_assets(world_card, "npc", dict(draft))
+    name = str(enriched.get("name") or "").strip()
+    if not name:
+        raise ValueError("introduced NPC has no name")
+    base_name = alternate_form_base_name(world_card, name)
+    lookup_names = [name]
+    if base_name and base_name not in lookup_names:
+        lookup_names.insert(0, base_name)
+    npc = await session.scalar(
+        select(NpcCard).where(
+            NpcCard.room_id == room_id, NpcCard.name.in_(lookup_names)
+        )
+    )
+    if npc is None:
+        npc = NpcCard(
+            room_id=room_id,
+            name=name,
+            persona=enriched.get("persona", ""),
+            appearance=enriched.get("appearance"),
+            voice_id=enriched.get("voice_id"),
+            voice_ref_url=enriched.get("voice_ref_url"),
+            voice_ref_text=enriched.get("voice_ref_text"),
+            voice_variants=(
+                json.dumps(
+                    [
+                        {
+                            "url": enriched["voice_ref_url"],
+                            "voice_id": enriched.get("voice_id"),
+                            "text": enriched.get("voice_ref_text"),
+                            "label": "默认语音",
+                            "source": "preset",
+                        }
+                    ],
+                    ensure_ascii=False,
+                )
+                if enriched.get("voice_ref_url") and enriched.get("voice_ref_text")
+                else None
+            ),
+            avatar_url=enriched.get("avatar_url"),
+            avatar_variants=(
+                json.dumps(
+                    [
+                        {
+                            "url": enriched["avatar_url"],
+                            "label": "形态头像" if base_name else "默认头像",
+                            "source": "preset",
+                        }
+                    ],
+                    ensure_ascii=False,
+                )
+                if enriched.get("avatar_url")
+                else None
+            ),
+            scene=scene or None,
+            created_by_ai=True,
+        )
+        session.add(npc)
+        return npc
+
+    npc.name = name
+    if enriched.get("persona"):
+        npc.persona = enriched["persona"]
+    if enriched.get("appearance"):
+        npc.appearance = enriched["appearance"]
+    if enriched.get("voice_id"):
+        npc.voice_id = enriched["voice_id"]
+    if enriched.get("voice_ref_url"):
+        npc.voice_ref_url = enriched["voice_ref_url"]
+    if enriched.get("voice_ref_text"):
+        npc.voice_ref_text = enriched["voice_ref_text"]
+    if enriched.get("avatar_url"):
+        _set_npc_avatar_variant(
+            npc,
+            enriched["avatar_url"],
+            label="形态头像" if base_name else "默认头像",
+            source="preset",
+        )
+    if scene:
+        npc.scene = scene
+    npc.active = True
+    return npc
 
 
 async def _apply_world_event_plan(
@@ -2509,20 +3139,6 @@ async def _apply_world_event_plan(
     time_steps = max(0, min(2555, time_steps))
     if force_timeskip:
         time_steps = 0
-    scene_change = (
-        str(plan.get("scene_change") or "").strip()[:64]
-        if plan.get("scene_change")
-        else ""
-    )
-    if scene_change and scene_change != current_scene:
-        effective_scene = await _auto_switch_scene(
-            coord,
-            scene_change,
-            str(plan.get("scene_reason") or "").strip()[:160] or "剧情自然转场",
-            advance_steps=time_steps,
-            time_reason=str(plan.get("time_reason") or "").strip()[:160] or None,
-        )
-        time_steps = 0
     if time_steps > 0:
         await _advance_time(
             coord,
@@ -2533,16 +3149,14 @@ async def _apply_world_event_plan(
     introduced: list[NpcCard] = []
     for draft in plan.get("introduce", []):
         async with SessionFactory() as session:
-            new_npc = NpcCard(
+            room = await session.get(Room, coord.room_id)
+            new_npc = await _upsert_introduced_npc(
+                session,
                 room_id=coord.room_id,
-                name=draft["name"],
-                persona=draft.get("persona", ""),
-                appearance=draft.get("appearance"),
-                voice_id=draft.get("voice_id"),
-                scene=effective_scene or None,
-                created_by_ai=True,
+                world_card=room.world_card if room is not None else None,
+                draft=draft,
+                scene=effective_scene,
             )
-            session.add(new_npc)
             await session.commit()
             await session.refresh(new_npc)
         introduced.append(new_npc)
@@ -2630,7 +3244,7 @@ async def _self_motivated_npcs(
         )
     # Keep the inner-vote cost bounded for crowded scenes. Selection is still
     # per-NPC; the cap only prevents one click from spawning dozens of calls.
-    for order, npc in enumerate(candidates[:8]):
+    for order, npc in enumerate(candidates):
         others = [
             f"{n.name}：{n.discovered or n.persona}"
             for n in candidates
@@ -2673,7 +3287,7 @@ async def _self_motivated_npcs(
             )
             scored.append((urgency, -order, npc))
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [npc for _urgency, _order, npc in scored[:3]]
+    return [npc for _urgency, _order, npc in scored]
 
 
 async def _simulate_offscreen_scenes(coord: RoomCoordinator) -> None:
@@ -2704,9 +3318,9 @@ async def _simulate_offscreen_scenes(coord: RoomCoordinator) -> None:
     if not scene_map:
         return
 
-    for scene, npcs in list(scene_map.items())[:5]:
+    for scene, npcs in list(scene_map.items()):
         npc_lines = "\n".join(
-            f"- {n.name}：{n.discovered or n.persona}" for n in npcs[:6]
+            f"- {n.name}：{n.discovered or n.persona}" for n in npcs
         )
         local_recent = (
             "\n".join(
@@ -2730,13 +3344,19 @@ async def _simulate_offscreen_scenes(coord: RoomCoordinator) -> None:
                                 "你是离屏场景模拟器。玩家正在别处行动时，"
                                 "这个场景里的 NPC 也会按自己的目标、"
                                 "关系和环境继续行动。"
-                                "写 1-2 句调试记录，可包含 NPC 之间互动、"
-                                "移动、筹划、交易或等待。"
+                                "生成本场景 NPC 之间的自然对话或叙事描述，"
+                                "体现他们的性格、关系、当前正在做的事。"
                                 "只能依据本场景过往记录、NPC 自身目标和公开世界常识；"
-                                "不要让他们知道玩家没公开的信息，不要替玩家行动，不写正式对白。"
-                                '只输出 JSON：{"text":"给开发者看的场景记录",'
-                                '"moves":[{"npc":"NPC名","scene":"目标场景"}]}。'
+                                "不要让他们知道玩家没公开的信息，不要替玩家行动。"
+                                '只输出 JSON：{"dialogue":"NPC对话或叙事，标注说话人",'
+                                '"moves":[{"npc":"NPC名","scene":"目标场景"}],'
+                                '"unlock_scenes":["新场景名"],'
+                                '"introduce_npcs":[{"name":"NPC名","persona":"人设",'
+                                '"appearance":"long hair, blue eyes",'
+                                '"scene":"所在场景"}]}。'
                                 "只有 NPC 明确离开本场景前往别处时才写 moves；"
+                                "只有 NPC 的行动合理带出新地点/新人物时才写 "
+                                "unlock_scenes/introduce_npcs；"
                                 "否则 moves=[]。"
                             ),
                         },
@@ -2759,17 +3379,31 @@ async def _simulate_offscreen_scenes(coord: RoomCoordinator) -> None:
                 flush=True,
             )
             continue
-        text, moves = parse_scene_simulation_output(
+        plan = parse_scene_simulation_plan(
             raw,
             [n.name for n in npcs],
             source_scene=scene,
         )
-        if text:
-            await _record_scene_log(coord, scene, "离屏行动", text, kind="offscreen")
+        text, moves = plan.text, plan.moves
+        # 尝试从 AI 输出中提取 dialogue 字段
+        parsed = parse_json_object(raw)
+        dialogue = (parsed.get("dialogue") or "") if isinstance(parsed, dict) else ""
+        entry_text = dialogue or text or f"{scene}的NPC们继续平静地活动。"
+        if entry_text:
+            await _record_scene_log(
+                coord, scene, "离屏行动", entry_text, kind="offscreen"
+            )
             await _apply_npc_scene_moves(
                 coord,
                 scene,
                 moves,
+                reason="离屏行动",
+            )
+            await _apply_scene_discoveries(
+                coord,
+                scene,
+                unlock_scenes=plan.unlock_scenes,
+                introduce_npcs=plan.introduce_npcs,
                 reason="离屏行动",
             )
 
@@ -2815,7 +3449,32 @@ async def _handle_story_beat(
         acted = False
         spoke_ids: list[int] = []
         for npc in speakers:
-            await _run_ai_turn(coord, npc)
+            try:
+                await _run_ai_turn(coord, npc)
+            except Exception as exc:  # noqa: BLE001 - do not drop a chosen NPC turn
+                print(
+                    f"[NPC-TURN] room={coord.room_id} npc={npc.name} error={exc}",
+                    flush=True,
+                )
+                fallback = "（短暂停顿后，视线重新落回你身上，像是正要开口。）"
+                msg = await _persist_message(
+                    room_id=coord.room_id,
+                    author_type="ai",
+                    speaker_label=npc.name,
+                    content=fallback,
+                    author_user_id=None,
+                )
+                await _record_scene_log(
+                    coord, effective_scene, npc.name, fallback, kind="ai"
+                )
+                await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+                await coord.broadcast(
+                    {
+                        "type": "error",
+                        "code": "npc_turn_failed",
+                        "detail": f"{npc.name} 的专属回合生成失败，已用角色占位承接。",
+                    }
+                )
             acted = True
             spoke_ids.append(npc.id)
 
@@ -2824,7 +3483,6 @@ async def _handle_story_beat(
             and not plan.get("time_jump")
             and not plan.get("narration")
             and not plan.get("time_advance_steps")
-            and not plan.get("scene_change")
         ):
             await _broadcast_narration(coord, NARRATOR_FALLBACK)
     finally:
@@ -2878,6 +3536,7 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
             initialized = []
         was_initialized = dest in initialized
         dest_last_seen = last_seen.get(dest)
+        now_index = leaving_index
         room.current_scene = dest
         room.scenes_meta = json.dumps(meta, ensure_ascii=False)
         await session.commit()
@@ -2894,7 +3553,6 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
             room = await session.get(Room, coord.room_id)
             if room is None:
                 return
-            now_index = room_time(room).index
             world_card = room.world_card
             meta = _load_scene_meta(room.scenes_meta)
             initialized = meta.get("_scene_initialized")
@@ -2902,7 +3560,6 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
                 initialized = []
         dest_npcs = await _scene_npcs(coord, dest)
         if not was_initialized:
-            await _show_scene_initialization(coord, dest, dest_npcs)
             if dest not in initialized:
                 initialized.append(dest)
             async with SessionFactory() as session:
@@ -2912,14 +3569,6 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
                     meta["_scene_initialized"] = initialized
                     room.scenes_meta = json.dumps(meta, ensure_ascii=False)
                     await session.commit()
-        elif dest_last_seen is not None:
-            try:
-                gap_start = int(dest_last_seen)
-            except (TypeError, ValueError):
-                gap_start = now_index
-            await _show_scene_elapsed_simulation(
-                coord, dest, dest_npcs, gap_start, now_index
-            )
 
         if dest_last_seen is None:
             ask = f"{party}来到「{dest}」。用一句话描写初次踏入此地所见的场景气氛。"
@@ -2969,6 +3618,7 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
     )
     await coord.broadcast({"type": "scene", "scene": dest})
     await coord.broadcast({"type": "message", "message": _msg_payload(msg)})
+    await _broadcast_scene_npcs(coord, dest)
     asyncio.create_task(
         asyncio.to_thread(
             memory_store.remember,
@@ -3005,6 +3655,145 @@ def _infer_scene_nsfw(scene_text: str, members: list[RoomMember]) -> bool:
             if isinstance(val, (int, float)) and val >= 30:
                 return True
     return False
+
+
+async def _handle_move(
+    coord: RoomCoordinator, user: User, data: dict[str, Any]
+) -> None:
+    """玩家发起移动：选择目标场景 + 携带 NPC → AI 判定各 NPC 是否同意 → 执行或拒绝。"""
+    dest = (data.get("scene") or "").strip()[:64]
+    npc_names: list[str] = data.get("npcs") or []
+    if not dest:
+        await coord.broadcast(
+            {"type": "error", "code": "move_failed", "detail": "未指定目标场景"}
+        )
+        return
+    async with SessionFactory() as session:
+        room = await session.get(Room, coord.room_id)
+        if room is None:
+            return
+        current_scene = room.current_scene or "自由场景"
+        if dest == current_scene:
+            await coord.broadcast(
+                {"type": "error", "code": "move_failed", "detail": "已在目标场景"}
+            )
+            return
+        meta: dict[str, Any] = json.loads(room.scenes_meta) if room.scenes_meta else {}
+        # NPC 信息
+        all_npcs = list(
+            (
+                await session.scalars(
+                    select(NpcCard).where(NpcCard.room_id == coord.room_id)
+                )
+            ).all()
+        )
+        nps_map = {n.name: n for n in all_npcs}
+        # 只判定被选中的、在当前场景的 NPC
+        candidates = [
+            n
+            for n in npc_names
+            if n in nps_map
+            and (not nps_map[n].scene or nps_map[n].scene == current_scene)
+        ]
+        if candidates:
+            # 一个 AI 调用判定所有 NPC
+            agree, refusals = await _judge_npc_move_consent(
+                candidates,
+                {n: nps_map[n] for n in candidates},
+                current_scene,
+                dest,
+            )
+            if not agree:
+                # 拒绝：生成系统消息 + 各 NPC 拒绝旁白
+                lines = "\n".join(f"{n}：{r}" for n, r in refusals)
+                await _broadcast_system(coord, f"🚫 移动被拒绝｜{dest}\n{lines}")
+                # 让拒绝的 NPC 各自说一句话
+                for n, r in refusals:
+                    npc = nps_map.get(n)
+                    if npc:
+                        msg = await _persist_message(
+                            room_id=coord.room_id,
+                            author_type="ai",
+                            speaker_label=n,
+                            content=f"（{r}）",
+                            author_user_id=None,
+                        )
+                        await coord.broadcast(
+                            {"type": "message", "message": _msg_payload(msg)}
+                        )
+                return
+        # 全部同意：执行移动
+        for n in candidates:
+            npc = nps_map.get(n)
+            if npc:
+                npc.scene = dest
+        # 解锁目标场景
+        unlocked = meta.get("_unlocked_scenes")
+        if not isinstance(unlocked, list):
+            unlocked = []
+        if dest not in unlocked:
+            unlocked.append(dest)
+        meta["_unlocked_scenes"] = unlocked
+        room.current_scene = dest
+        room.scenes_meta = json.dumps(meta, ensure_ascii=False)
+        await session.commit()
+    await coord.broadcast({"type": "scene", "scene": dest})
+    await coord.broadcast({"type": "cards_changed"})
+    await _broadcast_system(coord, f"🚶 玩家带人移动｜{current_scene} → {dest}")
+    await _broadcast_scene_npcs(coord, dest)
+    await _record_scene_log(
+        coord,
+        dest,
+        "场景变化",
+        f"{current_scene} → {dest}（玩家带队移动）",
+        kind="scene_change",
+    )
+
+
+async def _judge_npc_move_consent(
+    npc_names: list[str],
+    npc_map: dict[str, Any],
+    current_scene: str,
+    dest: str,
+) -> tuple[bool, list[tuple[str, str]]]:
+    """AI 裁判：各 NPC 是否同意跟玩家去目标场景。
+    返回 (all_agree, [(name, reason), ...])。"""
+    lines = "\n".join(
+        f"- {n}：人设={npc_map[n].persona or '（无）'}，"
+        f"外貌={npc_map[n].appearance or '（无）'}"
+        for n in npc_names
+    )
+    prompt = (
+        f"玩家想从「{current_scene}」前往「{dest}」，并希望以下 NPC 同行。\n"
+        f"请为每个 NPC 判定是否愿意去"
+        "（考虑性格、当前事务、与玩家的关系）：\n"
+        f"{lines}\n\n"
+        "只输出 JSON 数组，不要多余文字：\n"
+        '[{"name": "NPC名", "agree": true, "reason": "简短理由（10字内）"}]\n'
+        "如果 NPC 不愿意，agree 为 false。"
+    )
+    try:
+        from .brain import brain
+
+        raw = (await brain.complete([{"role": "user", "content": prompt}])).strip()
+    except Exception:
+        return True, []  # AI 调用失败时默认同意，不让移动卡死
+    from .json_utils import parse_json_object
+
+    parsed = parse_json_object(raw)
+    if isinstance(parsed, list):
+        decisions = parsed
+    elif isinstance(parsed, dict) and "result" in parsed:
+        decisions = parsed["result"]
+    else:
+        return True, []
+    refusals = []
+    for d in decisions:
+        name = d.get("name", "")
+        agree = d.get("agree", True)
+        if not agree:
+            refusals.append((name, d.get("reason", "不想去")))
+    return len(refusals) == 0, refusals
 
 
 async def _handle_image(
@@ -3049,42 +3838,48 @@ async def _handle_image(
             current_scene = (
                 await ensure_room_scene(session, room) if room is not None else ""
             )
-        recent_scene_text = (
-            "\n".join(
-                f"{m.speaker_label}: {m.content}"
-                for m in history[-6:]
-                if m.author_type in {"user", "ai"}
+        custom_prompt = (data or {}).get("custom_prompt", "").strip()
+        if custom_prompt:
+            scene_text = (
+                f"当前场景：{current_scene or '自由场景'}\n玩家输入：{custom_prompt}"
             )
-            or "一个角色扮演场景"
-        )
-        scene_text = f"当前场景：{current_scene or '自由场景'}\n{recent_scene_text}"
-        nsfw = _infer_scene_nsfw(scene_text, members)
-        if not nsfw:
+        else:
+            recent_scene_text = (
+                "\n".join(
+                    f"{m.speaker_label}: {m.content}"
+                    for m in history[-6:]
+                    if m.author_type in {"user", "ai"}
+                )
+                or "一个角色扮演场景"
+            )
+            scene_text = f"当前场景：{current_scene or '自由场景'}\n{recent_scene_text}"
+        # 自定义 prompt 时翻译为英文动作描述，注入 prompt
+        action_desc = ""
+        if custom_prompt:
             try:
-                narr = (
+                action_desc = (
                     await brain.complete(
                         [
                             {
                                 "role": "system",
                                 "content": (
-                                    "你是角色扮演旁白。根据最近对话和当前地点，用一两句"
-                                    "中文描写此刻可见的场景、人物站位、气氛和光线。"
-                                    "只写画面，不替玩家或 NPC 说话。"
+                                    "将用户的场景描述翻译成英文，用于 AI 绘图 prompt。"
+                                    "只输出英文动作/姿势描述，不要多余文字。"
+                                    "格式：简洁的英文动作句，如 "
+                                    "「the guild master is pinning the adventurer to "
+                                    "the desk, pulling down her clothes」"
                                 ),
                             },
                             {
                                 "role": "user",
-                                "content": (f"最近对话：\n{scene_text}"),
+                                "content": custom_prompt,
                             },
                         ]
                     )
                 ).strip()
             except Exception:
-                narr = ""
-            if narr:
-                # Use the visual narration only as prompt context. Scene image
-                # generation should not add a new timeline message.
-                scene_text = f"{scene_text}\n旁白: {narr}"
+                action_desc = ""
+        nsfw = True  # 本世界为 NSFW 内容，始终使用成人前缀
         # 外貌按"这一幕实际出场的角色"(玩家+NPC，看最近发言人)取各自外貌卡，
         # 而非固定取两个玩家——NPC 才常是画面主角。
         look: dict[str, str] = {}
@@ -3106,21 +3901,33 @@ async def _handle_image(
             ref = _media_url_to_path(n.avatar_url)
             if ref:
                 avatar_refs[n.name] = ref
-        scene_chars: list[str] = []
-        for msg in reversed(history[-8:]):
-            lbl = msg.speaker_label
-            if (
-                msg.author_type in {"user", "ai"}
-                and lbl in look
-                and lbl not in scene_chars
-                and lbl not in {"旁白", "AI"}
-            ):
-                scene_chars.append(lbl)
-            if len(scene_chars) >= 4:
-                break
+        member_names = [m.character_name for m in members if m.character_name]
+        npc_names = [n.name for n in npcs if n.name]
+        scene_chars = _scene_image_characters(
+            history,
+            member_names=member_names,
+            npc_names=npc_names,
+            look=look,
+        )
         if not scene_chars:
             scene_chars = [m.character_name for m in members if m.character_name][:4]
-        appearances = [f"{c}: {look[c]}" for c in scene_chars if c in look][:4]
+        # 自定义 prompt 中提及的角色追加到出场列表
+        if custom_prompt:
+            for name in look:
+                if name in custom_prompt and name not in scene_chars:
+                    scene_chars.append(name)
+        # 前端勾选的出场角色覆盖自动选择
+        selected_chars: list[str] | None = data.get("characters")
+        if selected_chars and isinstance(selected_chars, list):
+            scene_chars = [c for c in selected_chars if c in look][:2]
+        # AI 设计的角色外貌覆盖：前端传了 designed_appearance 时做临时角色
+        designed_appearance = (data or {}).get("designed_appearance", "").strip()
+        if designed_appearance:
+            design_name = "AI角色"
+            look[design_name] = designed_appearance
+            if design_name not in scene_chars:
+                scene_chars.insert(0, design_name)
+        appearances = [f"{c}: {look[c]}" for c in scene_chars if c in look][:2]
         two_person = len(appearances) >= 2
         # 人物/场景一致性：同一房间、地点、登场角色组得到稳定 seed；
         # 外貌卡 + 最多两张头像参考继续约束人物细节。
@@ -3138,7 +3945,11 @@ async def _handle_image(
             # Anima DiT 原生多主体：双人互动走双人提示词，但最终仍合成一段
             # prompt；角色一致性由姓名+外貌事实+头像参考共同约束，不做区域 mask。
             prompt = await build_scene_prompt(
-                scene_text, appearances, nsfw=nsfw, two_person=two_person
+                scene_text,
+                appearances,
+                nsfw=nsfw,
+                two_person=two_person,
+                action_desc=action_desc,
             )
             # scene_prompt returns tag-soup format for both single and duo
             positive = prompt.get("positive", "")
@@ -3149,8 +3960,8 @@ async def _handle_image(
                 seed=seed,
                 reference_image_paths=reference_image_paths,
                 ipadapter_weight=0.48 if two_person else 0.48,
-                upscale=False,
-                tile_refine=False,
+                upscale=True,
+                tile_refine=True,
             )
         except Exception as exc:  # noqa: BLE001 — surface as room error
             res = {"error": str(exc)}
@@ -3301,31 +4112,36 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
             elif kind == "advance":
                 npc_id = data.get("npc_id")
                 if npc_id is not None:
-                    npc = None
-                    try:
-                        async with SessionFactory() as session:
-                            cand = await session.get(NpcCard, int(npc_id))
-                        if cand is not None and cand.room_id == room_id:
-                            npc = cand
-                    except (ValueError, TypeError):
-                        npc = None
+                    npc = await _resolve_advance_npc(room_id, npc_id)
+                    if npc is None:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "code": "npc_invalid",
+                                "detail": "这个角色不能接话",
+                            }
+                        )
+                        continue
                     await _handle_advance(coord, npc)
                 else:
                     # 无指定 NPC → 导演自动调度本拍谁反应。
                     await _handle_story_beat(coord)
+                asyncio.create_task(_simulate_offscreen_scenes(coord))
                 asyncio.create_task(_judge_and_apply_stats(coord, user.id))
             elif kind == "timeskip":
                 await _handle_story_beat(coord, force_timeskip=True)
+                asyncio.create_task(_simulate_offscreen_scenes(coord))
                 asyncio.create_task(_judge_and_apply_stats(coord, user.id))
             elif kind == "goto_scene":
                 await _handle_goto_scene(coord, data.get("scene", ""))
+                asyncio.create_task(_simulate_offscreen_scenes(coord))
             elif kind == "describe_scene":
                 await _handle_describe_scene(coord)
+            elif kind == "move":
+                await _handle_move(coord, user, data)
             elif kind == "god_whisper":
                 async with coord.lock:
-                    await _handle_god_whisper(
-                        websocket, coord, user, str(data.get("content", ""))
-                    )
+                    await _handle_god_whisper(websocket, coord, user, data)
             elif kind == "pay_npc":
                 async with coord.lock:
                     await _handle_pay_npc(

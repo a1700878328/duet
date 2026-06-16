@@ -1,6 +1,7 @@
 import ormsgpack
 import pytest
 
+from app import rooms as rooms_mod
 from app import voice as voice_mod
 from app.voice import VoiceClient
 
@@ -40,6 +41,49 @@ def test_design_description_maps_to_stable_placeholder() -> None:
 
     assert first == second
     assert first.startswith(("eleven-design-", "fish-design-", "fish_clone-design-"))
+
+
+def test_preview_padding_stays_in_dialogue() -> None:
+    text = voice_mod._ensure_preview_text("你好，我是林晚。我会认真听你说话。")
+
+    assert 0 < len(text) <= voice_mod.VOICE_PREVIEW_MAX_CHARS
+    assert "保持角色本人" not in text
+    assert "根据你的情绪" not in text
+    assert "语音设计" not in text
+    assert "林晚" in text
+
+
+def test_manual_voice_description_is_used_for_design() -> None:
+    manual = "年轻女性，小恶魔法师感，清亮偏低的女声。"
+
+    assert rooms_mod._manual_voice_design(manual) == manual
+    assert rooms_mod._manual_voice_design("fish-clone:abcdef123456") is None
+    assert rooms_mod._manual_voice_design("eleven:abcdef123456") is None
+
+
+@pytest.mark.asyncio
+async def test_voice_reference_fallback_is_character_line(monkeypatch) -> None:
+    class ShortBrain:
+        temperature = 0
+        max_tokens = 0
+
+        async def complete(self, _messages):
+            return "你好。"
+
+    monkeypatch.setattr(rooms_mod, "default_provider", lambda: ShortBrain())
+
+    line = await rooms_mod._voice_reference_text(
+        "公会会长",
+        "冒险者公会会长，威严的管理者，负责审核新人委托。",
+        "银灰色辫发，锐利眼神",
+    )
+
+    assert rooms_mod.VOICE_REFERENCE_MIN_CHARS <= len(line)
+    assert len(line) <= rooms_mod.VOICE_REFERENCE_MAX_CHARS
+    assert "公会会长" in line
+    assert "委托" in line
+    assert "保持角色本人" not in line
+    assert "语音设计" not in line
 
 
 @pytest.mark.asyncio
@@ -118,7 +162,11 @@ async def test_fish_tags_use_reference_context(monkeypatch, tmp_path) -> None:
 
     _url, _headers, _payload, content = FakeAsyncClient.posted[0]
     decoded = ormsgpack.unpackb(content)
-    assert decoded["text"].startswith("[teasing][soft laugh]")
+    assert decoded["text"].startswith("[happy][chuckling]")
+    assert (
+        len(decoded["references"][0]["text"])
+        <= voice_mod.VOICE_REFERENCE_PAYLOAD_MAX_CHARS
+    )
 
 
 class FakeElevenResponse:
@@ -189,7 +237,8 @@ async def test_eleven_design_saves_preview_when_clone_unavailable(monkeypatch) -
     assert designed.voice_id == "eleven:saved_123"
     assert designed.reference_audio == b"reference-mp3"
     design_payload = FakeElevenClient.posts[0][3]
-    assert design_payload["model_id"] == "eleven_ttv_v3"
+    assert design_payload["model_id"] == "eleven_multilingual_ttv_v2"
+    assert "text" in design_payload
     assert len(design_payload["text"]) >= 100
 
 

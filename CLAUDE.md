@@ -6,6 +6,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Duet** — a 2-player collaborative AI roleplay game (SP-1 vertical slice). Two players share a room with AI-directed NPCs in a fantasy world. The backend drives narrative, NPC behavior, stat management, image generation (ComfyUI), and voice synthesis (ElevenLabs/Fish Audio). The frontend is a React + Vite SPA.
 
+## Current Source-of-Truth Guardrails
+
+Read this before making changes. These rules are here because a stale Claude plan once overwrote newer Codex work.
+
+- Treat the current worktree and tests as source of truth. Do not restore behavior from `.claude/plans`, older chat summaries, old specs, or checkpoint memory without first verifying it in the current code.
+- Historical docs under `docs/superpowers/specs/` are design context, not current UI requirements. If they conflict with current code/tests, update the docs or ask, but do not reintroduce removed controls.
+- Do not re-add a global `R18` button, a global `让 AI 接话` button, a global `推进时间` button, or an NPC auto-play voice toggle. Current flow is per-NPC action, private God whisper, scene/time systems, manual TTS preview.
+- `上帝` is the private control channel (`npc_id=0`), not a public NPC speaker. WebSocket `advance` must never silently fall back to God or a generic AI speaker when an invalid NPC id is sent.
+- For `ksim`, initial visible preset NPCs exclude alternate/future forms. The hidden alternate form `魅魔化的会长` must not appear beside `公会会长` in the initial role list or card panel.
+- Alternate forms should update the same NPC's `name/persona/appearance/avatar_url` and add an `avatar_variants` entry. Do not create a second always-on card for an alternate form.
+- Default generated preset media lives in `app/preset_asset_manifest.json` and is produced by `scripts/pregen_preset_assets.py`. Do not hardcode generated room-local media paths into `world_presets.py`.
+- Portrait revisions must be treated as candidates first: use `scripts/pregen_preset_assets.py --candidate-only` and get user approval before changing `app/preset_asset_manifest.json`. Do not overwrite liked default art such as the feminine 魔王/哥布林法师 style with global "mature/horror/monster" prompt changes.
+- Confirmed KSim default portraits: `借贷商人` uses the otome-antagonist merchant portrait `9b75232...`, `教官` uses the visual-novel male-lead portrait `dea6c9e...`, and `武道家` uses the feminine martial-artist portrait `4ceca62...`.
+- Male portrait generation should be attractive visual-novel/otome style, not horror, brute, or childlike. Keep this as a gentle male-only branch; do not apply it to female cards whose persona merely mentions men or the instructor.
+- Voice reference lines for design/cloning should be short character lines, roughly 45-90 Chinese characters. Do not pad ElevenLabs previews to long samples or reintroduce mechanical filler like "保持角色本人".
+- Character selection must preserve `voice_ref_url`, `voice_ref_text`, `avatar_url`, and `avatar_variants` when copying protagonist, world-role, generated, or account-library cards into the player card.
+
+Minimum verification before handoff:
+
+```bash
+cd backend && uv run pytest -q
+cd backend && uv run ruff check .
+cd backend && uv run python scripts/verify_preset_assets.py --world ksim
+cd frontend && npm run build
+```
+
 ## Dev Commands
 
 ### Backend (Python 3.13+, uv)

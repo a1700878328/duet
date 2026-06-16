@@ -119,12 +119,27 @@ def parse_stats(data: dict[str, Any] | None) -> CharacterSheet:
     }
     for k in KNOWN_FIELDS:
         v = data.get(k)
-        if v is not None:
-            cleaned[k] = int(v) if not isinstance(v, int) else v
+        field = CharacterSheet.model_fields.get(k)
+        if v is None or field is None:
+            continue
+        if field.annotation is int:
+            try:
+                cleaned[k] = int(v)
+            except (TypeError, ValueError):
+                continue
+        else:
+            cleaned[k] = str(v)
 
-    # 物品栏 — promote from legacy string list
+    # 物品栏 — accept structured items or promote from legacy string list
+    if isinstance(data.get("物品栏"), list):
+        cleaned["物品栏"] = [
+            Item.model_validate(i) if isinstance(i, dict) else Item(name=str(i))
+            for i in data["物品栏"]
+            if i
+        ]
+
     legacy_items = data.get("物品") or []
-    if legacy_items and not data.get("物品栏"):
+    if legacy_items and not cleaned.get("物品栏"):
         seen: dict[str, int] = {}
         for name in legacy_items:
             name = str(name).strip()
@@ -132,12 +147,18 @@ def parse_stats(data: dict[str, Any] | None) -> CharacterSheet:
                 seen[name] = seen.get(name, 0) + 1
         cleaned["物品栏"] = [Item(name=n, quantity=q) for n, q in seen.items()]
 
-    # 状态 — promote from legacy string list
+    # 状态 — accept structured effects or promote from legacy string list
+    cleaned["状态"] = []
+    raw_states = data.get("状态") or []
+    if isinstance(raw_states, list) and raw_states:
+        if all(isinstance(s, dict) for s in raw_states):
+            cleaned["状态"] = [StatusEffect.model_validate(s) for s in raw_states]
+        else:
+            cleaned["状态"] = [_parse_state_string(str(s)) for s in raw_states if s]
+
     legacy_states = data.get("状态") or []
-    if legacy_states and not data.get("状态"):
-        for s in legacy_states:
-            if s:
-                cleaned["状态"].append(_parse_state_string(str(s)))
+    if legacy_states and not cleaned["状态"]:
+        cleaned["状态"] = [_parse_state_string(str(s)) for s in legacy_states if s]
 
     # 好感度
     cleaned["好感度"] = dict(data.get("好感度") or {})

@@ -34,6 +34,30 @@ class MeOut(BaseModel):
     user: UserOut
 
 
+class AvatarVariantOut(BaseModel):
+    url: str = Field(min_length=1, max_length=256)
+    label: str | None = Field(default=None, max_length=64)
+    source: str | None = Field(default=None, max_length=32)
+    created_at: str | None = Field(default=None, max_length=40)
+
+
+class AvatarSelectIn(BaseModel):
+    avatar_url: str = Field(min_length=1, max_length=256)
+
+
+class VoiceVariantOut(BaseModel):
+    url: str = Field(min_length=1, max_length=256)
+    voice_id: str | None = Field(default=None, max_length=200)
+    text: str | None = Field(default=None, max_length=1000)
+    label: str | None = Field(default=None, max_length=64)
+    source: str | None = Field(default=None, max_length=32)
+    created_at: str | None = Field(default=None, max_length=40)
+
+
+class VoiceSelectIn(BaseModel):
+    voice_ref_url: str = Field(min_length=1, max_length=256)
+
+
 class MemberOut(BaseModel):
     user_id: int
     display_name: str
@@ -43,7 +67,9 @@ class MemberOut(BaseModel):
     voice_id: str | None = None
     voice_ref_url: str | None = None
     voice_ref_text: str | None = None
+    voice_variants: list["VoiceVariantOut"] = Field(default_factory=list)
     avatar_url: str | None = None
+    avatar_variants: list["AvatarVariantOut"] = Field(default_factory=list)
     stats: dict[str, Any] | None = None
 
 
@@ -84,6 +110,8 @@ class MeCardUpdateIn(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=256)
     voice_ref_url: str | None = Field(default=None, max_length=256)
     voice_ref_text: str | None = Field(default=None, max_length=1000)
+    voice_variants: list["VoiceVariantOut"] | None = None
+    avatar_variants: list["AvatarVariantOut"] | None = None
     reset_stats: bool = False
 
 
@@ -94,7 +122,9 @@ class UserCharacterCardIn(BaseModel):
     voice_id: str | None = Field(default=None, max_length=200)
     voice_ref_url: str | None = Field(default=None, max_length=256)
     voice_ref_text: str | None = Field(default=None, max_length=1000)
+    voice_variants: list["VoiceVariantOut"] | None = None
     avatar_url: str | None = Field(default=None, max_length=256)
+    avatar_variants: list["AvatarVariantOut"] | None = None
     source_world_card: str | None = Field(default=None, max_length=32)
 
 
@@ -108,7 +138,9 @@ class UserCharacterCardOut(BaseModel):
     voice_id: str | None = None
     voice_ref_url: str | None = None
     voice_ref_text: str | None = None
+    voice_variants: list["VoiceVariantOut"] = Field(default_factory=list)
     avatar_url: str | None = None
+    avatar_variants: list["AvatarVariantOut"] = Field(default_factory=list)
     source_world_card: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -126,6 +158,10 @@ class NpcGenIn(BaseModel):
     hint: str | None = Field(default=None, max_length=500)
 
 
+class NpcEvolveIn(BaseModel):
+    persona_add: str = Field(min_length=1, max_length=2000)
+
+
 class NpcCardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,7 +172,9 @@ class NpcCardOut(BaseModel):
     voice_id: str | None = None
     voice_ref_url: str | None = None
     voice_ref_text: str | None = None
+    voice_variants: list["VoiceVariantOut"] = Field(default_factory=list)
     avatar_url: str | None = None
+    avatar_variants: list["AvatarVariantOut"] = Field(default_factory=list)
     active: bool = True
     scene: str | None = None
     discovered: str | None = None
@@ -145,6 +183,22 @@ class NpcCardOut(BaseModel):
 
 class NpcActiveIn(BaseModel):
     active: bool
+
+
+class SceneDesignIn(BaseModel):
+    scene_name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class SceneDesignOut(BaseModel):
+    scene_name: str
+    scene_type: str  # safe / dangerous / empty / populated
+    atmosphere: str
+    potential_npcs: list[dict[str, str]] = Field(
+        default_factory=list, description="[{name, persona, appearance}]"
+    )
+    scene_intro: str
+    unlocked: bool
 
 
 class CharOptionsIn(BaseModel):
@@ -159,7 +213,11 @@ class CharDraftOut(BaseModel):
     persona: str
     appearance: str | None = None
     voice_id: str | None = None
+    voice_ref_url: str | None = Field(default=None, max_length=256)
+    voice_ref_text: str | None = Field(default=None, max_length=1000)
+    voice_variants: list[VoiceVariantOut] = Field(default_factory=list)
     avatar_url: str | None = None
+    avatar_variants: list[AvatarVariantOut] = Field(default_factory=list)
 
 
 class TtsIn(BaseModel):

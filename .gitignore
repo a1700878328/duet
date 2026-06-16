@@ -17,3 +17,4 @@ backend/app/memory_store/
 *.log
 *.tsbuildinfo
 .playwright-mcp/
+.tmp/

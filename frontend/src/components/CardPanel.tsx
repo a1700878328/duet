@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { MEDIA_GENERATION_ENABLED, VOICE_GENERATION_ENABLED } from "../lib/features";
-import type { MemberCard, NpcCard, RoomCards, UserCharacterCard } from "../lib/types";
+import type {
+  AvatarVariant,
+  MemberCard,
+  NpcCard,
+  RoomCards,
+  UserCharacterCard,
+  VoiceVariant,
+} from "../lib/types";
 import { CardEditor, type CardDraft } from "./CardEditor";
 import type { ProfileView } from "./RoomOverlays";
 
@@ -12,7 +19,7 @@ interface Props {
   onClose: () => void;
   // Make the given NPC react in the timeline (advance with npc_id).
   onNpcSpeak: (npcId: number) => void;
-  onGodWhisper?: (text: string) => void;
+  onGodWhisper?: (params: { target_npc: string; scene?: string; action: string }) => void;
   onError?: (msg: string) => void;
   // Disable speak actions while an AI turn is in flight.
   aiBusy?: boolean;
@@ -21,6 +28,8 @@ interface Props {
   onRefresh: () => Promise<void> | void;
   onOpenProfile?: (profile: ProfileView) => void;
   onOpenCharacterSelect?: () => void;
+  currentScene?: string;
+  sceneOptions?: string[];
 }
 
 const EMPTY_DRAFT: CardDraft = {
@@ -59,6 +68,95 @@ function AvatarThumb({
   );
 }
 
+function AvatarVariantStrip({
+  variants,
+  currentUrl,
+  busyUrl,
+  onSelect,
+}: {
+  variants?: AvatarVariant[] | null;
+  currentUrl?: string | null;
+  busyUrl?: string | null;
+  onSelect: (url: string) => void;
+}) {
+  const items = (variants ?? []).filter((v) => v.url);
+  if (items.length <= 1) return null;
+  return (
+    <div className="avatar-variant-strip">
+      {items.map((variant) => {
+        const active = variant.url === currentUrl;
+        const busy = variant.url === busyUrl;
+        return (
+          <button
+            type="button"
+            key={variant.url}
+            className={`avatar-variant ${active ? "active" : ""}`}
+            disabled={active || busy}
+            onClick={() => onSelect(variant.url)}
+            title={variant.label || "切换头像"}
+          >
+            {busy ? (
+              <span className="spinner spinner-dark" />
+            ) : (
+              <img src={assetUrl(variant.url)} alt={variant.label || "头像"} />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function VoiceVariantStrip({
+  variants,
+  currentUrl,
+  busyUrl,
+  onSelect,
+  onPreview,
+}: {
+  variants?: VoiceVariant[] | null;
+  currentUrl?: string | null;
+  busyUrl?: string | null;
+  onSelect: (url: string) => void;
+  onPreview: (url: string) => void;
+}) {
+  const items = (variants ?? []).filter((v) => v.url);
+  if (items.length <= 1) return null;
+  return (
+    <div className="voice-variant-strip">
+      {items.map((variant, idx) => {
+        const active = variant.url === currentUrl;
+        const busy = variant.url === busyUrl;
+        const label = variant.label || `语音${idx + 1}`;
+        return (
+          <div
+            className={`voice-variant ${active ? "active" : ""}`}
+            key={variant.url}
+            title={variant.text || label}
+          >
+            <button
+              type="button"
+              className="voice-variant-select"
+              disabled={active || busy}
+              onClick={() => onSelect(variant.url)}
+            >
+              {busy ? <span className="spinner spinner-dark" /> : label}
+            </button>
+            <button
+              type="button"
+              className="voice-variant-play"
+              onClick={() => onPreview(variant.url)}
+              aria-label={`试听${label}`}
+            >
+              ▶
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CardPanel({
   roomId,
   myUserId,
@@ -72,10 +170,14 @@ export function CardPanel({
   onRefresh,
   onOpenProfile,
   onOpenCharacterSelect,
+  currentScene,
 }: Props) {
   const players = cards?.players ?? [];
   const npcs = cards?.npcs ?? [];
   const loaded = cards !== null;
+  const currentSceneNpcs = npcs.filter(
+    (n) => n.name !== "上帝" && (!n.scene || n.scene === (currentScene || ""))
+  );
 
   const [editing, setEditing] = useState<EditTarget>(null);
   const [saving, setSaving] = useState(false);
@@ -90,6 +192,12 @@ export function CardPanel({
   const [libraryCards, setLibraryCards] = useState<UserCharacterCard[]>([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [savingLibrary, setSavingLibrary] = useState(false);
+  const [avatarSelectBusy, setAvatarSelectBusy] = useState<string | null>(null);
+  const [voiceSelectBusy, setVoiceSelectBusy] = useState<string | null>(null);
+  const [myCardOverride, setMyCardOverride] = useState<MemberCard | null>(null);
+  const [godModalOpen, setGodModalOpen] = useState(false);
+  const [godTargetNpc, setGodTargetNpc] = useState("");
+  const [godAction, setGodAction] = useState("");
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewStopRef = useRef<number | null>(null);
 
@@ -124,10 +232,24 @@ export function CardPanel({
     }
   }, [open, refresh, refreshLibrary]);
 
-  const myCard = players.find((p) => String(p.user_id) === String(myUserId));
+  const myCardFromCards = players.find((p) => String(p.user_id) === String(myUserId));
+  const myCard =
+    myCardOverride && String(myCardOverride.user_id) === String(myUserId)
+      ? myCardOverride
+      : myCardFromCards;
   const otherPlayers = players.filter(
     (p) => String(p.user_id) !== String(myUserId),
   );
+
+  useEffect(() => {
+    setMyCardOverride(null);
+  }, [
+    roomId,
+    myUserId,
+    myCardFromCards?.character_name,
+    myCardFromCards?.persona,
+    myCardFromCards?.appearance,
+  ]);
 
   function setBusy<T>(
     setter: React.Dispatch<React.SetStateAction<Set<T>>>,
@@ -145,12 +267,13 @@ export function CardPanel({
   async function saveMe(draft: CardDraft) {
     setSaving(true);
     try {
-      await api.updateMeCard(roomId, {
+      const updated = await api.updateMeCard(roomId, {
         character_name: draft.name,
         persona: draft.persona,
         appearance: draft.appearance || null,
         voice_id: draft.voice_id || null,
       });
+      setMyCardOverride(updated);
       setEditing(null);
       await refresh();
     } catch (err) {
@@ -168,7 +291,9 @@ export function CardPanel({
       voice_id: card.voice_id ?? null,
       voice_ref_url: card.voice_ref_url ?? null,
       voice_ref_text: card.voice_ref_text ?? null,
+      voice_variants: card.voice_variants ?? null,
       avatar_url: card.avatar_url ?? null,
+      avatar_variants: card.avatar_variants ?? null,
     };
   }
 
@@ -197,16 +322,19 @@ export function CardPanel({
   async function applyLibraryCard(card: UserCharacterCard) {
     setLibraryBusy(true);
     try {
-      await api.updateMeCard(roomId, {
+      const updated = await api.updateMeCard(roomId, {
         character_name: card.name,
         persona: card.persona,
         appearance: card.appearance ?? null,
         voice_id: card.voice_id ?? null,
         voice_ref_url: card.voice_ref_url ?? null,
         voice_ref_text: card.voice_ref_text ?? null,
+        voice_variants: card.voice_variants ?? null,
         avatar_url: card.avatar_url ?? null,
+        avatar_variants: card.avatar_variants ?? null,
         reset_stats: true,
       });
+      setMyCardOverride(updated);
       await refresh();
     } catch (err) {
       fail(err, "读取账号角色失败");
@@ -278,7 +406,8 @@ export function CardPanel({
   async function genMyAvatar() {
     setBusy<string>(setAvatarBusy, "me", true);
     try {
-      await api.generateMyAvatar(roomId);
+      const updated = await api.generateMyAvatar(roomId);
+      setMyCardOverride(updated);
       await refresh();
     } catch (err) {
       fail(err, "生成头像失败");
@@ -287,15 +416,42 @@ export function CardPanel({
     }
   }
 
+  async function selectMyAvatar(url: string) {
+    setAvatarSelectBusy(`me:${url}`);
+    try {
+      const updated = await api.selectMyAvatar(roomId, url);
+      setMyCardOverride(updated);
+      await refresh();
+    } catch (err) {
+      fail(err, "切换头像失败");
+    } finally {
+      setAvatarSelectBusy(null);
+    }
+  }
+
   async function genMyVoice() {
     setVoiceBusy(true);
     try {
-      await api.generateMyVoice(roomId);
+      const updated = await api.generateMyVoice(roomId);
+      setMyCardOverride(updated);
       await refresh();
     } catch (err) {
       fail(err, "设定我的角色语音失败");
     } finally {
       setVoiceBusy(false);
+    }
+  }
+
+  async function selectMyVoice(url: string) {
+    setVoiceSelectBusy(`me:${url}`);
+    try {
+      const updated = await api.selectMyVoice(roomId, url);
+      setMyCardOverride(updated);
+      await refresh();
+    } catch (err) {
+      fail(err, "切换角色语音失败");
+    } finally {
+      setVoiceSelectBusy(null);
     }
   }
 
@@ -351,6 +507,18 @@ export function CardPanel({
     }
   }
 
+  async function selectNpcAvatar(npc: NpcCard, url: string) {
+    setAvatarSelectBusy(`npc:${npc.id}:${url}`);
+    try {
+      await api.selectNpcAvatar(roomId, npc.id, url);
+      await refresh();
+    } catch (err) {
+      fail(err, "切换头像失败");
+    } finally {
+      setAvatarSelectBusy(null);
+    }
+  }
+
   async function genNpcVoice(npc: NpcCard) {
     setBusy(setNpcVoiceBusy, npc.id, true);
     try {
@@ -360,6 +528,36 @@ export function CardPanel({
       fail(err, "设定角色语音失败");
     } finally {
       setBusy(setNpcVoiceBusy, npc.id, false);
+    }
+  }
+
+  async function evolveNpc(npc: NpcCard) {
+    try {
+      await api.evolveNpc(roomId, npc.id);
+      await refresh();
+    } catch (err) {
+      fail(err, "角色进化失败");
+    }
+  }
+
+  async function evolveMyCard(personaAdd: string) {
+    try {
+      await api.evolveMyCard(roomId, personaAdd);
+      await refresh();
+    } catch (err) {
+      fail(err, "角色进化失败");
+    }
+  }
+
+  async function selectNpcVoice(npc: NpcCard, url: string) {
+    setVoiceSelectBusy(`npc:${npc.id}:${url}`);
+    try {
+      await api.selectNpcVoice(roomId, npc.id, url);
+      await refresh();
+    } catch (err) {
+      fail(err, "切换角色语音失败");
+    } finally {
+      setVoiceSelectBusy(null);
     }
   }
 
@@ -493,12 +691,26 @@ export function CardPanel({
                         )}
                       </button>
                     )}
+                    {(
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          const add = window.prompt(
+                            `追加角色人设：\n当前：${(myCard.persona || "").slice(0, 100)}…`
+                          );
+                          if (add?.trim()) evolveMyCard(add.trim());
+                        }}
+                        title="追加人设→AI调外貌→重生头像"
+                      >
+                        🌱 进化
+                      </button>
+                    )}
                     {VOICE_GENERATION_ENABLED && (
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={genMyVoice}
                         disabled={voiceBusy}
-                        title="根据当前角色卡设定 Eleven 角色语音"
+                        title="根据当前角色卡设定日漫风格角色语音"
                       >
                         {voiceBusy ? (
                           <>
@@ -546,6 +758,27 @@ export function CardPanel({
                       )}
                     </button>
                   </div>
+                  <AvatarVariantStrip
+                    variants={myCard.avatar_variants}
+                    currentUrl={myCard.avatar_url}
+                    busyUrl={
+                      avatarSelectBusy?.startsWith("me:")
+                        ? avatarSelectBusy.slice(3)
+                        : null
+                    }
+                    onSelect={(url) => void selectMyAvatar(url)}
+                  />
+                  <VoiceVariantStrip
+                    variants={myCard.voice_variants}
+                    currentUrl={myCard.voice_ref_url}
+                    busyUrl={
+                      voiceSelectBusy?.startsWith("me:")
+                        ? voiceSelectBusy.slice(3)
+                        : null
+                    }
+                    onSelect={(url) => void selectMyVoice(url)}
+                    onPreview={previewVoice}
+                  />
                 </div>
               </div>
             ) : (
@@ -751,12 +984,7 @@ export function CardPanel({
                       {isGod ? (
                         <button
                           className="btn btn-primary btn-sm"
-                          onClick={() => {
-                            const text = window.prompt(
-                              "私聊上帝：你想强制影响当前场景里的 NPC 做什么？",
-                            );
-                            if (text?.trim()) onGodWhisper?.(text.trim());
-                          }}
+                          onClick={() => setGodModalOpen(true)}
                           disabled={aiBusy}
                           title="私聊上帝，暗中强制影响当前场景 NPC 的行动"
                         >
@@ -795,12 +1023,21 @@ export function CardPanel({
                           )}
                         </button>
                       )}
+                      {!isGod && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => evolveNpc(npc)}
+                          title="根据当前人设自动调整外貌tag→重生头像"
+                        >
+                          🌱 进化
+                        </button>
+                      )}
                       {VOICE_GENERATION_ENABLED && !isGod && (
                         <button
                           className="btn btn-ghost btn-sm"
                           onClick={() => genNpcVoice(npc)}
                           disabled={busyVoice}
-                          title="根据角色卡设定 Eleven 角色语音"
+                          title="根据角色卡设定日漫风格角色语音"
                         >
                           {busyVoice ? (
                             <>
@@ -840,6 +1077,27 @@ export function CardPanel({
                         </button>
                       )}
                     </div>
+                    <AvatarVariantStrip
+                      variants={npc.avatar_variants}
+                      currentUrl={npc.avatar_url}
+                      busyUrl={
+                        avatarSelectBusy?.startsWith(`npc:${npc.id}:`)
+                          ? avatarSelectBusy.slice(`npc:${npc.id}:`.length)
+                          : null
+                      }
+                      onSelect={(url) => void selectNpcAvatar(npc, url)}
+                    />
+                    <VoiceVariantStrip
+                      variants={npc.voice_variants}
+                      currentUrl={npc.voice_ref_url}
+                      busyUrl={
+                        voiceSelectBusy?.startsWith(`npc:${npc.id}:`)
+                          ? voiceSelectBusy.slice(`npc:${npc.id}:`.length)
+                          : null
+                      }
+                      onSelect={(url) => void selectNpcVoice(npc, url)}
+                      onPreview={previewVoice}
+                    />
                   </div>
                 );
               })}
@@ -914,6 +1172,53 @@ export function CardPanel({
           </section>
         </div>
       </aside>
+
+      {godModalOpen && (
+        <div className="overlay-backdrop" onClick={() => setGodModalOpen(false)}>
+          <div className="move-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>👁 上帝私聊</h3>
+            <select
+              className="input"
+              value={godTargetNpc}
+              onChange={(e) => setGodTargetNpc(e.target.value)}
+            >
+              <option value="">— 选择目标 NPC —</option>
+              {currentSceneNpcs.map((n) => (
+                <option key={n.id} value={n.name}>{n.name}</option>
+              ))}
+            </select>
+            <label style={{ marginTop: 12 }}>让角色做什么</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="如：干我、跟我走、命令他…"
+              value={godAction}
+              onChange={(e) => setGodAction(e.target.value)}
+              autoFocus
+            />
+            <div className="move-actions">
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={aiBusy || !godTargetNpc || !godAction.trim()}
+                onClick={() => {
+                  onGodWhisper?.({
+                    target_npc: godTargetNpc,
+                    action: godAction.trim(),
+                  });
+                  setGodModalOpen(false);
+                  setGodTargetNpc("");
+                  setGodAction("");
+                }}
+              >
+                确认
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setGodModalOpen(false)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

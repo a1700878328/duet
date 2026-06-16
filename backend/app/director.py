@@ -79,14 +79,12 @@ async def judge_world_beat(
         '{"narration": null 或 "1-2句旁白正文，不带[旁白]前缀", '
         '"acts": [], '
         '"introduce": [{"name":"中文名","persona":"一句话身份+性格+说话风格",'
-        '"appearance":"英文自然语言外貌描述",'
+        '"appearance":"Danbooru-style English visual tags",'
         '"voice_id":"中文声音描述(性别+年龄+音色+语气)"}], '
         '"time_jump": null 或 '
         '"一句话:时间流逝+这段时间世界/相关NPC做了什么/局势变化", '
         '"time_advance_steps": 0, '
         '"time_reason": null 或 "一句话说明为什么时间自然经过", '
-        '"scene_change": null 或 "当前场面明确抵达/进入的地点名", '
-        '"scene_reason": null 或 "一句话说明为什么切换场景", '
         '"unlock_scenes": ["剧情自然出现、之后可前往的新地点名"]}\n'
         "原则：acts 必须输出空数组；不要替任何现有 NPC 安排发言。"
         "narration 用于开场、玩家刚到新地点、场景气氛变化、行动后果或镜头落点；"
@@ -165,27 +163,6 @@ async def judge_world_beat(
     if time_advance_steps <= 0:
         time_reason = None
 
-    raw_scene_change = data.get("scene_change")
-    scene_change = (
-        raw_scene_change.strip()[:64]
-        if isinstance(raw_scene_change, str) and raw_scene_change.strip()
-        else None
-    )
-    if (
-        force_timeskip
-        or not allow_auto_changes
-        or (scene_change and scene_change == scene)
-    ):
-        scene_change = None
-    raw_scene_reason = data.get("scene_reason")
-    scene_reason = (
-        raw_scene_reason.strip()[:160]
-        if isinstance(raw_scene_reason, str) and raw_scene_reason.strip()
-        else None
-    )
-    if scene_change is None:
-        scene_reason = None
-
     raw_narration = data.get("narration")
     narration = (
         raw_narration.strip()[:600]
@@ -220,8 +197,6 @@ async def judge_world_beat(
         "time_jump": time_jump,
         "time_advance_steps": time_advance_steps,
         "time_reason": time_reason,
-        "scene_change": scene_change,
-        "scene_reason": scene_reason,
         "unlock_scenes": unlock_scenes,
     }
 

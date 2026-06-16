@@ -143,6 +143,26 @@ export function MessageBubble({
           {content}
           {streaming && <span className="cursor" aria-hidden />}
         </div>
+        {isMe && onPlayVoice && (
+          <div className="speaker" style={{ textAlign: "right", marginTop: 2 }}>
+            <button
+              type="button"
+              onClick={onPlayVoice}
+              title="播放/重播配音"
+              aria-label="播放配音"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 13,
+                padding: "0 2px",
+                opacity: 0.75,
+              }}
+            >
+              🔊
+            </button>
+          </div>
+        )}
       </div>
       {isMe && avatar}
     </div>

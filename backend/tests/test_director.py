@@ -154,8 +154,8 @@ async def test_director_keeps_small_auto_time_and_scene_change() -> None:
     assert plan["acts"] == []
     assert plan["time_advance_steps"] == 1
     assert plan["time_reason"] == "女骑士离开公会，花了一段路程前往酒馆。"
-    assert plan["scene_change"] == "酒馆"
-    assert plan["scene_reason"] == "玩家明确说要去酒馆。"
+    assert "scene_change" not in plan
+    assert "scene_reason" not in plan
     assert plan["unlock_scenes"] == ["酒馆"]
 
 
@@ -177,8 +177,8 @@ async def test_director_can_disable_auto_changes() -> None:
 
     assert plan["time_advance_steps"] == 0
     assert plan["time_reason"] is None
-    assert plan["scene_change"] is None
-    assert plan["scene_reason"] is None
+    assert "scene_change" not in plan
+    assert "scene_reason" not in plan
 
 
 class MultiActsBrain:

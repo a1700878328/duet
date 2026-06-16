@@ -170,7 +170,7 @@ export function RoomsPage() {
             title="世界卡"
           >
             <option value="">无世界卡</option>
-            <option value="ksim">《女骑士模拟器》</option>
+            <option value="ksim">女骑士模拟器</option>
           </select>
           <button className="btn btn-primary" disabled={busy}>
             创建

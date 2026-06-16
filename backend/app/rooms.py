@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -22,9 +23,12 @@ from .imagegen.anima import char_seed
 from .imagegen.portrait import generate_portrait
 from .models import Message, NpcCard, Room, RoomMember, User, UserCharacterCard
 from .npc_gen import generate_npcs
+from .preset_assets import apply_preset_assets
 from .scene_logs import logs_from_meta, scene_key
 from .schemas import (
     AuthOut,
+    AvatarSelectIn,
+    AvatarVariantOut,
     CardsOut,
     CharDraftOut,
     CharOptionsIn,
@@ -37,11 +41,14 @@ from .schemas import (
     NpcActiveIn,
     NpcCardIn,
     NpcCardOut,
+    NpcEvolveIn,
     NpcGenIn,
     RegisterIn,
     RoomCreateIn,
     RoomJoinIn,
     RoomOut,
+    SceneDesignIn,
+    SceneDesignOut,
     SceneLogEntryOut,
     SceneLogOut,
     TtsIn,
@@ -49,6 +56,8 @@ from .schemas import (
     UserCharacterCardIn,
     UserCharacterCardOut,
     UserOut,
+    VoiceSelectIn,
+    VoiceVariantOut,
 )
 from .security import (
     create_token,
@@ -58,12 +67,293 @@ from .security import (
 )
 from .stats import default_stats, initial_stats_from_card
 from .voice import store as voice_store
-from .world_presets import preset_npcs, scene_options, start_scene
+from .world_presets import (
+    hidden_initial_npc_names,
+    preset_npcs,
+    scene_options,
+    start_scene,
+)
 
 router = APIRouter(prefix="/api")
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def _avatar_variant_dicts(
+    value: str | list[dict] | list[AvatarVariantOut] | None,
+    current_url: str | None = None,
+) -> list[dict[str, str]]:
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except Exception:
+            raw = []
+    else:
+        raw = value or []
+    variants: list[dict[str, str]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, AvatarVariantOut):
+                item = item.model_dump(exclude_none=True)
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            variant = {"url": url}
+            for field in ("label", "source", "created_at"):
+                val = str(item.get(field) or "").strip()
+                if val:
+                    variant[field] = val
+            variants.append(variant)
+            seen.add(url)
+    current = (current_url or "").strip()
+    if current and current not in seen:
+        variants.insert(
+            0,
+            {
+                "url": current,
+                "label": "当前头像",
+                "source": "current",
+            },
+        )
+    return variants
+
+
+def _avatar_variants_out(
+    value: str | list[dict] | list[AvatarVariantOut] | None,
+    current_url: str | None = None,
+) -> list[AvatarVariantOut]:
+    return [AvatarVariantOut(**v) for v in _avatar_variant_dicts(value, current_url)]
+
+
+def _avatar_variants_json(
+    value: str | list[dict] | list[AvatarVariantOut] | None,
+    current_url: str | None = None,
+) -> str | None:
+    variants = _avatar_variant_dicts(value, current_url)
+    return json.dumps(variants, ensure_ascii=False) if variants else None
+
+
+def _add_avatar_variant(
+    card: RoomMember | NpcCard | UserCharacterCard,
+    url: str,
+    *,
+    label: str,
+    source: str,
+) -> None:
+    variants = _avatar_variant_dicts(card.avatar_variants, card.avatar_url)
+    if not any(v["url"] == url for v in variants):
+        variants.insert(
+            0,
+            {
+                "url": url,
+                "label": label,
+                "source": source,
+                "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            },
+        )
+    card.avatar_url = url
+    card.avatar_variants = _avatar_variants_json(variants)
+
+
+def _select_avatar_variant(card: RoomMember | NpcCard, url: str) -> None:
+    variants = _avatar_variant_dicts(card.avatar_variants, card.avatar_url)
+    if not any(v["url"] == url for v in variants):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="头像不在该角色的历史槽位里",
+        )
+    card.avatar_url = url
+    card.avatar_variants = _avatar_variants_json(variants, url)
+
+
+def _avatar_variants_from_url(
+    url: str | None, *, label: str = "默认头像", source: str = "preset"
+) -> str | None:
+    if not url:
+        return None
+    return _avatar_variants_json([{"url": url, "label": label, "source": source}])
+
+
+def _voice_variant_dicts(
+    value: str | list[dict] | list[VoiceVariantOut] | None,
+    current_url: str | None = None,
+    current_voice_id: str | None = None,
+    current_text: str | None = None,
+) -> list[dict[str, str]]:
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except Exception:
+            raw = []
+    else:
+        raw = value or []
+    variants: list[dict[str, str]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, VoiceVariantOut):
+                item = item.model_dump(exclude_none=True)
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            variant = {"url": url}
+            for field in ("voice_id", "text", "label", "source", "created_at"):
+                val = str(item.get(field) or "").strip()
+                if val:
+                    variant[field] = val
+            variants.append(variant)
+            seen.add(url)
+    current = (current_url or "").strip()
+    if current and current not in seen:
+        variant = {
+            "url": current,
+            "label": "当前语音",
+            "source": "current",
+        }
+        if current_voice_id:
+            variant["voice_id"] = current_voice_id
+        if current_text:
+            variant["text"] = current_text
+        variants.insert(0, variant)
+    return variants
+
+
+def _voice_variants_out(
+    value: str | list[dict] | list[VoiceVariantOut] | None,
+    current_url: str | None = None,
+    current_voice_id: str | None = None,
+    current_text: str | None = None,
+) -> list[VoiceVariantOut]:
+    return [
+        VoiceVariantOut(**v)
+        for v in _voice_variant_dicts(
+            value,
+            current_url,
+            current_voice_id,
+            current_text,
+        )
+    ]
+
+
+def _voice_variants_json(
+    value: str | list[dict] | list[VoiceVariantOut] | None,
+    current_url: str | None = None,
+    current_voice_id: str | None = None,
+    current_text: str | None = None,
+) -> str | None:
+    variants = _voice_variant_dicts(
+        value,
+        current_url,
+        current_voice_id,
+        current_text,
+    )
+    return json.dumps(variants, ensure_ascii=False) if variants else None
+
+
+def _add_voice_variant(
+    card: RoomMember | NpcCard | UserCharacterCard,
+    *,
+    voice_id: str,
+    ref_url: str,
+    ref_text: str,
+    label: str,
+    source: str,
+) -> None:
+    variants = _voice_variant_dicts(
+        getattr(card, "voice_variants", None),
+        getattr(card, "voice_ref_url", None),
+        getattr(card, "voice_id", None),
+        getattr(card, "voice_ref_text", None),
+    )
+    if not any(v["url"] == ref_url for v in variants):
+        variant = {
+            "url": ref_url,
+            "voice_id": voice_id,
+            "text": ref_text,
+            "label": label,
+            "source": source,
+            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        variants.insert(0, variant)
+    card.voice_id = voice_id
+    card.voice_ref_url = ref_url
+    card.voice_ref_text = ref_text
+    card.voice_variants = _voice_variants_json(
+        variants,
+        ref_url,
+        voice_id,
+        ref_text,
+    )
+
+
+def _select_voice_variant(card: RoomMember | NpcCard, ref_url: str) -> None:
+    variants = _voice_variant_dicts(
+        getattr(card, "voice_variants", None),
+        getattr(card, "voice_ref_url", None),
+        getattr(card, "voice_id", None),
+        getattr(card, "voice_ref_text", None),
+    )
+    selected = next((v for v in variants if v["url"] == ref_url), None)
+    if selected is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="语音不在该角色的历史槽位里",
+        )
+    card.voice_ref_url = selected["url"]
+    card.voice_id = selected.get("voice_id") or card.voice_id
+    card.voice_ref_text = selected.get("text") or card.voice_ref_text
+    card.voice_variants = _voice_variants_json(
+        variants,
+        card.voice_ref_url,
+        card.voice_id,
+        card.voice_ref_text,
+    )
+
+
+def _preset_npcs_with_assets(world_card: str | None) -> list[dict]:
+    return [apply_preset_assets(world_card, "npc", p) for p in preset_npcs(world_card)]
+
+
+def _apply_missing_preset_assets(npc: NpcCard, preset: dict) -> bool:
+    """Patch only empty generated-asset fields on an existing preset NPC."""
+    changed = False
+    had_reference = bool(npc.voice_ref_url and npc.voice_ref_text)
+    for attr in ("avatar_url", "voice_ref_url", "voice_ref_text"):
+        value = preset.get(attr)
+        if value and not getattr(npc, attr):
+            setattr(npc, attr, value)
+            changed = True
+    if preset.get("avatar_url") and not npc.avatar_variants:
+        npc.avatar_variants = _avatar_variants_from_url(preset.get("avatar_url"))
+        changed = True
+    if (
+        preset.get("voice_ref_url")
+        and preset.get("voice_ref_text")
+        and not npc.voice_variants
+    ):
+        npc.voice_variants = _voice_variants_json(
+            None,
+            preset.get("voice_ref_url"),
+            preset.get("voice_id"),
+            preset.get("voice_ref_text"),
+        )
+        changed = True
+    preset_voice_id = preset.get("voice_id")
+    preset_has_reference = bool(
+        preset.get("voice_ref_url") and preset.get("voice_ref_text")
+    )
+    if preset_voice_id and (
+        not npc.voice_id or (preset_has_reference and not had_reference)
+    ):
+        npc.voice_id = preset_voice_id
+        changed = True
+    return changed
 
 
 async def _broadcast_cards_changed(room_id: int) -> None:
@@ -78,6 +368,106 @@ async def _broadcast_lobby_changed() -> None:
     from .ws import notify_lobby_rooms_changed
 
     await notify_lobby_rooms_changed()
+
+
+def _user_character_card_out(card: UserCharacterCard) -> UserCharacterCardOut:
+    return UserCharacterCardOut(
+        id=card.id,
+        name=card.name,
+        persona=card.persona,
+        appearance=card.appearance,
+        voice_id=card.voice_id,
+        voice_ref_url=card.voice_ref_url,
+        voice_ref_text=card.voice_ref_text,
+        voice_variants=_voice_variants_out(
+            card.voice_variants,
+            card.voice_ref_url,
+            card.voice_id,
+            card.voice_ref_text,
+        ),
+        avatar_url=card.avatar_url,
+        avatar_variants=_avatar_variants_out(card.avatar_variants, card.avatar_url),
+        source_world_card=card.source_world_card,
+        created_at=card.created_at,
+        updated_at=card.updated_at,
+    )
+
+
+async def _ensure_preset_npcs(session: AsyncSession, room: Room) -> bool:
+    """Backfill missing world-card preset NPCs for rooms created by older code."""
+    changed = False
+    hidden_names = hidden_initial_npc_names(room.world_card)
+    if hidden_names:
+        hidden_cards = (
+            await session.scalars(
+                select(NpcCard).where(
+                    NpcCard.room_id == room.id,
+                    NpcCard.name.in_(hidden_names),
+                    NpcCard.active.is_(True),
+                )
+            )
+        ).all()
+        for npc in hidden_cards:
+            npc.active = False
+            changed = True
+
+    presets = _preset_npcs_with_assets(room.world_card)
+    if not presets:
+        if changed:
+            await session.flush()
+        return changed
+    preset_names = [str(p["name"]) for p in presets if p.get("name")]
+    if not preset_names:
+        if changed:
+            await session.flush()
+        return changed
+    existing_cards = (
+        await session.scalars(
+            select(NpcCard).where(
+                NpcCard.room_id == room.id,
+                NpcCard.name.in_(preset_names),
+            )
+        )
+    ).all()
+    existing_by_name = {npc.name: npc for npc in existing_cards}
+    seen_names = set(existing_by_name)
+    for p in presets:
+        name = str(p.get("name") or "").strip()
+        if not name:
+            continue
+        if name in seen_names:
+            existing = existing_by_name.get(name)
+            if existing is None:
+                continue
+            if _apply_missing_preset_assets(existing, p):
+                changed = True
+            continue
+        session.add(
+            NpcCard(
+                room_id=room.id,
+                name=name,
+                persona=p["persona"],
+                appearance=p.get("appearance"),
+                voice_id=p.get("voice_id"),
+                voice_ref_url=p.get("voice_ref_url"),
+                voice_ref_text=p.get("voice_ref_text"),
+                voice_variants=_voice_variants_json(
+                    None,
+                    p.get("voice_ref_url"),
+                    p.get("voice_id"),
+                    p.get("voice_ref_text"),
+                ),
+                avatar_url=p.get("avatar_url"),
+                avatar_variants=_avatar_variants_from_url(p.get("avatar_url")),
+                scene=p.get("scene"),
+                created_by_ai=True,
+            )
+        )
+        seen_names.add(name)
+        changed = True
+    if changed:
+        await session.flush()
+    return changed
 
 
 @router.get("/health", response_model=HealthOut)
@@ -132,7 +522,7 @@ async def list_my_character_cards(
             .order_by(UserCharacterCard.updated_at.desc(), UserCharacterCard.id.desc())
         )
     ).all()
-    return [UserCharacterCardOut.model_validate(c) for c in cards]
+    return [_user_character_card_out(c) for c in cards]
 
 
 @router.post("/me/character-cards", response_model=UserCharacterCardOut)
@@ -147,13 +537,20 @@ async def create_my_character_card(
         voice_id=body.voice_id,
         voice_ref_url=body.voice_ref_url,
         voice_ref_text=body.voice_ref_text,
+        voice_variants=_voice_variants_json(
+            body.voice_variants,
+            body.voice_ref_url,
+            body.voice_id,
+            body.voice_ref_text,
+        ),
         avatar_url=body.avatar_url,
+        avatar_variants=_avatar_variants_json(body.avatar_variants, body.avatar_url),
         source_world_card=body.source_world_card,
     )
     session.add(card)
     await session.commit()
     await session.refresh(card)
-    return UserCharacterCardOut.model_validate(card)
+    return _user_character_card_out(card)
 
 
 @router.put("/me/character-cards/{card_id}", response_model=UserCharacterCardOut)
@@ -174,11 +571,18 @@ async def update_my_character_card(
     card.voice_id = body.voice_id
     card.voice_ref_url = body.voice_ref_url
     card.voice_ref_text = body.voice_ref_text
+    card.voice_variants = _voice_variants_json(
+        body.voice_variants,
+        body.voice_ref_url,
+        body.voice_id,
+        body.voice_ref_text,
+    )
     card.avatar_url = body.avatar_url
+    card.avatar_variants = _avatar_variants_json(body.avatar_variants, body.avatar_url)
     card.source_world_card = body.source_world_card
     await session.commit()
     await session.refresh(card)
-    return UserCharacterCardOut.model_validate(card)
+    return _user_character_card_out(card)
 
 
 @router.delete("/me/character-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -224,7 +628,7 @@ async def create_room(
         )
     )
     # 世界卡常驻主要 NPC：开场就在场（NPC 数非 0），其余怪物由 director 临场引入。
-    for p in preset_npcs(room.world_card):
+    for p in _preset_npcs_with_assets(room.world_card):
         session.add(
             NpcCard(
                 room_id=room.id,
@@ -232,6 +636,10 @@ async def create_room(
                 persona=p["persona"],
                 appearance=p.get("appearance"),
                 voice_id=p.get("voice_id"),
+                voice_ref_url=p.get("voice_ref_url"),
+                voice_ref_text=p.get("voice_ref_text"),
+                avatar_url=p.get("avatar_url"),
+                avatar_variants=_avatar_variants_from_url(p.get("avatar_url")),
                 scene=p.get("scene"),
                 created_by_ai=True,
             )
@@ -373,8 +781,39 @@ def _member_card(m: RoomMember, display_name: str) -> MemberOut:
         voice_id=m.voice_id,
         voice_ref_url=m.voice_ref_url,
         voice_ref_text=m.voice_ref_text,
+        voice_variants=_voice_variants_out(
+            m.voice_variants,
+            m.voice_ref_url,
+            m.voice_id,
+            m.voice_ref_text,
+        ),
         avatar_url=m.avatar_url,
+        avatar_variants=_avatar_variants_out(m.avatar_variants, m.avatar_url),
         stats=json.loads(m.stats) if m.stats else default_stats(),
+    )
+
+
+def _npc_card_out(npc: NpcCard) -> NpcCardOut:
+    return NpcCardOut(
+        id=npc.id,
+        name=npc.name,
+        persona=npc.persona,
+        appearance=npc.appearance,
+        voice_id=npc.voice_id,
+        voice_ref_url=npc.voice_ref_url,
+        voice_ref_text=npc.voice_ref_text,
+        voice_variants=_voice_variants_out(
+            npc.voice_variants,
+            npc.voice_ref_url,
+            npc.voice_id,
+            npc.voice_ref_text,
+        ),
+        avatar_url=npc.avatar_url,
+        avatar_variants=_avatar_variants_out(npc.avatar_variants, npc.avatar_url),
+        active=npc.active,
+        scene=npc.scene,
+        discovered=npc.discovered,
+        created_by_ai=npc.created_by_ai,
     )
 
 
@@ -421,6 +860,82 @@ async def _voice_design_for_card(
     return (raw or "").strip().strip("\"'“”")[:200]
 
 
+def _manual_voice_design(voice_id: str | None) -> str | None:
+    text = re.sub(r"\s+", " ", (voice_id or "").strip())
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith(("fish:", "fish-clone:", "reference:", "ref:", "eleven:")):
+        return None
+    if lowered.startswith("design:"):
+        return None
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{10,}", text):
+        return None
+    return text[:200]
+
+
+_BAD_VOICE_REFERENCE_MARKERS = (
+    "保持角色本人",
+    "根据你的情绪",
+    "认真回应",
+    "语音设计",
+    "试听台词",
+    "角色本人",
+)
+VOICE_REFERENCE_MIN_CHARS = 45
+VOICE_REFERENCE_MAX_CHARS = 90
+
+
+def _clean_voice_reference_text(raw: str | None) -> str:
+    line = re.sub(r"\s+", "", (raw or "").strip().strip("\"'“”"))
+    line = re.sub(r"^[\[【(（][^\]】)）]{1,40}[\]】)）][:：]?", "", line)
+    line = re.sub(r"^\s*[^：:\n]{1,24}\s*[:：]\s*", "", line)
+    line = re.sub(r"[（(][^）)\n]{1,80}[）)]", "", line)
+    return line.strip("「」『』\"'“” ")
+
+
+def _clip_voice_reference_text(text: str) -> str:
+    return _clean_voice_reference_text(text)[:VOICE_REFERENCE_MAX_CHARS]
+
+
+def _voice_reference_fallback(name: str, persona: str | None) -> str:
+    text = persona or ""
+    if any(w in text for w in ("商人", "借贷", "契约", "利息", "钱")):
+        return _clip_voice_reference_text(
+            f"哎呀，{name}在这里。缺钱也好，想谈条件也好，都可以坐下来慢慢说。"
+            "契约上的小字要看清楚哦，我最喜欢知道自己价值的客人。"
+        )
+    if any(w in text for w in ("教官", "训练", "战斗", "严肃")):
+        return _clip_voice_reference_text(
+            f"我是{name}。站稳，抬头，看着我的动作。害怕没有关系，动作乱了才要挨训。"
+            "再来一次，把呼吸压住，让我看看你能撑到哪一步。"
+        )
+    if any(w in text for w in ("老板娘", "酒馆", "热情", "消息")):
+        return _clip_voice_reference_text(
+            f"欢迎回来呀，{name}这里今天也很热闹。想喝一杯，还是想听点只在吧台后面流传的消息？"
+            "别这么拘谨嘛，坐近一点，我保证今晚不让你空手离开。"
+        )
+    if any(w in text for w in ("会长", "公会", "威严", "管理")):
+        return _clip_voice_reference_text(
+            f"我是{name}。新人，先把委托书放到桌上，抬头回答我。"
+            "逞强救不了任何人；把声音放稳，把理由说清楚。"
+        )
+    if any(w in text for w in ("冷", "寡言", "沉默", "刺客")):
+        return _clip_voice_reference_text(
+            f"我是{name}。别靠太近，也别把声音抬高。"
+            "我会听完你的请求，但要不要帮你，是我的判断。"
+        )
+    if any(w in text for w in ("活泼", "开朗", "元气", "可爱", "少女")):
+        return _clip_voice_reference_text(
+            f"你好呀，我是{name}！终于轮到我出场了吧？"
+            "别紧张，今天一定会很有意思，你只要跟上我的节奏就好。"
+        )
+    return _clip_voice_reference_text(
+        f"你好，我是{name}。先把你的想法告诉我吧。"
+        "我会听清楚每一句话，再用我自己的方式回应你。"
+    )
+
+
 async def _voice_reference_text(
     name: str, persona: str | None, appearance: str | None
 ) -> str:
@@ -431,7 +946,8 @@ async def _voice_reference_text(
         "第一人称，像角色本人开口；必须体现职业/身份、性格、说话风格和与玩家的关系；"
         "台词要方便生成日本动漫/视觉小说声优感：有自然语气词、情绪起伏、短停顿、"
         "轻微口癖或尾音；可爱或反差可爱优先，但不能违背角色设定；"
-        "不要旁白、动作描写、括号、引号；不要露骨色情；100 到 180 个中文字符。\n"
+        "不要旁白、动作描写、括号、引号；允许符合角色和世界观的成人台词；"
+        f"{VOICE_REFERENCE_MIN_CHARS} 到 80 个中文字符，别写太长，避免浪费语音额度。\n"
         f"角色名：{name}\n"
         f"人设：{persona or '（无）'}\n"
         f"外貌：{appearance or '（无）'}"
@@ -447,19 +963,46 @@ async def _voice_reference_text(
         )
     except Exception:
         raw = ""
-    line = re.sub(r"\s+", "", (raw or "").strip().strip("\"'“”"))
-    if len(line) >= 80:
-        return line[:220]
-    tone = "我会记住每一笔账，也会认真回应你的每一句话。"
-    if persona and any(w in persona for w in ("冷", "寡言", "沉默")):
-        tone = "我会安静地看清局势，然后在必要的时候开口。"
-    elif persona and any(w in persona for w in ("活泼", "开朗", "热情")):
-        tone = "今天一定会很有意思，我已经有点期待接下来的故事了。"
-    elif persona and any(w in persona for w in ("商人", "借贷", "高利贷", "债")):
-        tone = (
-            "钱可以先拿去用，利息嘛，我们慢慢算清楚。别紧张，我最喜欢守信用的客人了。"
+    line = _clean_voice_reference_text(raw)
+    if len(line) >= VOICE_REFERENCE_MIN_CHARS and not any(
+        marker in line for marker in _BAD_VOICE_REFERENCE_MARKERS
+    ):
+        return line[:VOICE_REFERENCE_MAX_CHARS]
+    return _voice_reference_fallback(name, persona)
+
+
+def _voice_design_fallback(
+    name: str, persona: str | None, appearance: str | None
+) -> str:
+    text = f"{name} {persona or ''} {appearance or ''}"
+    gender = (
+        "年轻女性"
+        if re.search(r"(女|少女|woman|girl|female)", text, re.I)
+        else "成年角色"
+    )
+    return (
+        f"{gender}，原创日本动画/视觉小说声优感，音色清晰有辨识度，"
+        "语速自然，情绪表演贴合角色人设，停顿干净，尾音带轻微动画感"
+    )[:200]
+
+
+async def _voice_metadata_for_card(
+    *,
+    name: str,
+    persona: str | None,
+    appearance: str | None,
+    voice_id: str | None,
+) -> tuple[str, str]:
+    try:
+        design = _manual_voice_design(voice_id) or await _voice_design_for_card(
+            name=name, persona=persona, appearance=appearance
         )
-    return f"你好，我是{name}。{tone}"
+    except Exception:
+        design = _manual_voice_design(voice_id)
+    if not design:
+        design = _voice_design_fallback(name, persona, appearance)
+    ref_text = await _voice_reference_text(name, persona, appearance)
+    return design, ref_text
 
 
 def _write_audio_bytes(
@@ -499,14 +1042,12 @@ async def _design_and_write_voice(
     appearance: str | None,
     voice_id: str | None,
 ) -> tuple[str, str, str]:
-    design = await _voice_design_for_card(
-        name=name, persona=persona, appearance=appearance
+    design, ref_text = await _voice_metadata_for_card(
+        name=name,
+        persona=persona,
+        appearance=appearance,
+        voice_id=voice_id,
     )
-    if not design:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="生成音色描述失败"
-        )
-    ref_text = await _voice_reference_text(name, persona, appearance)
     designed = await voice_store.design_voice(
         name=name, voice_description=design, reference_text=ref_text
     )
@@ -530,41 +1071,149 @@ async def _design_and_write_voice(
 
 
 async def _refresh_member_voice_reference(room_id: int, member: RoomMember) -> None:
-    voice_id, ref_url, ref_text = await _design_and_write_voice(
-        room_id=room_id,
-        owner_key=f"member:{member.user_id}",
-        name=member.character_name,
-        persona=member.persona,
-        appearance=member.appearance,
-        voice_id=member.voice_id,
+    try:
+        voice_id, ref_url, ref_text = await _design_and_write_voice(
+            room_id=room_id,
+            owner_key=f"member:{member.user_id}",
+            name=member.character_name,
+            persona=member.persona,
+            appearance=member.appearance,
+            voice_id=member.voice_id,
+        )
+    except HTTPException:
+        voice_id, ref_text = await _voice_metadata_for_card(
+            name=member.character_name,
+            persona=member.persona,
+            appearance=member.appearance,
+            voice_id=member.voice_id,
+        )
+        member.voice_id = voice_id
+        member.voice_ref_text = ref_text
+        return
+    _add_voice_variant(
+        member,
+        voice_id=voice_id,
+        ref_url=ref_url,
+        ref_text=ref_text,
+        label="重生语音",
+        source="generated",
     )
-    member.voice_id = voice_id
-    member.voice_ref_url = ref_url
-    member.voice_ref_text = ref_text
 
 
 async def _refresh_npc_voice_reference(room_id: int, npc: NpcCard) -> None:
-    voice_id, ref_url, ref_text = await _design_and_write_voice(
-        room_id=room_id,
-        owner_key=f"npc:{npc.id}",
-        name=npc.name,
-        persona=npc.persona,
-        appearance=npc.appearance,
-        voice_id=npc.voice_id,
+    try:
+        voice_id, ref_url, ref_text = await _design_and_write_voice(
+            room_id=room_id,
+            owner_key=f"npc:{npc.id}",
+            name=npc.name,
+            persona=npc.persona,
+            appearance=npc.appearance,
+            voice_id=npc.voice_id,
+        )
+    except HTTPException:
+        voice_id, ref_text = await _voice_metadata_for_card(
+            name=npc.name,
+            persona=npc.persona,
+            appearance=npc.appearance,
+            voice_id=npc.voice_id,
+        )
+        npc.voice_id = voice_id
+        npc.voice_ref_text = ref_text
+        return
+    _add_voice_variant(
+        npc,
+        voice_id=voice_id,
+        ref_url=ref_url,
+        ref_text=ref_text,
+        label="重生语音",
+        source="generated",
     )
-    npc.voice_id = voice_id
-    npc.voice_ref_url = ref_url
-    npc.voice_ref_text = ref_text
 
 
+def _json_object_from_text(raw: str) -> dict:
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except Exception:
+        match = re.search(r"\{.*\}", text, re.S)
+        if not match:
+            return {}
+        try:
+            data = json.loads(match.group(0))
+        except Exception:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+async def _evolve_member_card_fields(
+    *,
+    name: str,
+    old_persona: str,
+    old_appearance: str,
+    persona_add: str,
+) -> tuple[str, str]:
+    brain = default_provider()
+    try:
+        brain.temperature = 0.45
+        brain.max_tokens = max(getattr(brain, "max_tokens", 800), 1200)
+    except Exception:
+        pass
+    prompt = (
+        "玩家为自己的角色卡追加了一段新人设。请把旧人设和追加人设融合成一版"
+        "更完整、可直接用于角色扮演的新角色卡，同时微调英文外貌 tag。"
+        "要求：保留角色基础身份、发色、瞳色、体型和标志物；只补充与新人设相关的"
+        "服装、气质、表情、姿态、配饰或场景感。外貌必须是 Danbooru-style "
+        "English tags，用逗号分隔，包含 hair/eyes/colored eyelashes/"
+        "expression+blush+mouth/body/outfit/camera/gaze/lighting。嘴型默认 "
+        "closed mouth 或 parted lips，不要默认 open mouth。"
+        "严格只输出 JSON object，不要 Markdown："
+        '{"persona":"融合后的中文人设","appearance":"英文tag串"}\n'
+        f"角色名：{name}\n"
+        f"旧人设：{old_persona or '（无）'}\n"
+        f"旧外貌 tag：{old_appearance or '（无）'}\n"
+        f"追加人设：{persona_add}"
+    )
+    try:
+        raw = await brain.complete(
+            [
+                {"role": "system", "content": "只输出合法 JSON object。"},
+                {"role": "user", "content": prompt},
+            ]
+        )
+    except Exception:
+        raw = ""
+    data = _json_object_from_text(raw)
+    persona = str(data.get("persona") or "").strip()
+    appearance = str(data.get("appearance") or "").strip().strip("\"'").strip(" ,")
+    if not persona:
+        persona = f"{old_persona}（{persona_add}）" if old_persona else persona_add
+    if not appearance:
+        appearance = old_appearance
+    return persona[:4000], appearance[:512]
+
+
+@router.get("/rooms/{room_id}/cards", response_model=CardsOut)
 async def list_cards(room_id: int, user: CurrentUser, session: SessionDep) -> CardsOut:
     await _require_member(session, room_id, user.id)
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
+        )
+    if await _ensure_preset_npcs(session, room):
+        await session.commit()
     members = (
         await session.scalars(select(RoomMember).where(RoomMember.room_id == room_id))
     ).all()
     npcs = (
         await session.scalars(select(NpcCard).where(NpcCard.room_id == room_id))
     ).all()
+    hidden_names = hidden_initial_npc_names(room.world_card)
+    if hidden_names:
+        npcs = [n for n in npcs if n.name not in hidden_names]
     god = NpcCardOut(
         id=0,
         name="上帝",
@@ -577,6 +1226,7 @@ async def list_cards(room_id: int, user: CurrentUser, session: SessionDep) -> Ca
         voice_ref_url=None,
         voice_ref_text=None,
         avatar_url=None,
+        avatar_variants=[],
         active=True,
         scene=None,
         discovered="可私聊：把想强制发生的事告诉上帝。",
@@ -584,7 +1234,7 @@ async def list_cards(room_id: int, user: CurrentUser, session: SessionDep) -> Ca
     )
     return CardsOut(
         players=[_member_card(m, m.user.display_name) for m in members],
-        npcs=[god, *[NpcCardOut.model_validate(n) for n in npcs]],
+        npcs=[god, *[_npc_card_out(n) for n in npcs]],
     )
 
 
@@ -599,19 +1249,21 @@ async def preset_characters(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
         )
-    names = {p["name"] for p in preset_npcs(room.world_card)}
+    presets = _preset_npcs_with_assets(room.world_card)
+    names = {p["name"] for p in presets}
     if not names:
         return []
+    if await _ensure_preset_npcs(session, room):
+        await session.commit()
     npcs = (
         await session.scalars(
             select(NpcCard).where(
                 NpcCard.room_id == room_id,
                 NpcCard.name.in_(names),
-                NpcCard.active.is_(True),
             )
         )
     ).all()
-    return [NpcCardOut.model_validate(n) for n in npcs]
+    return [_npc_card_out(n) for n in npcs]
 
 
 _PROTAGONIST_CARDS: dict[str, CharDraftOut] = {
@@ -644,7 +1296,15 @@ async def get_protagonist(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
         )
-    return _PROTAGONIST_CARDS.get(room.world_card or "")
+    base = _PROTAGONIST_CARDS.get(room.world_card or "")
+    if base is None:
+        return None
+    data = apply_preset_assets(
+        room.world_card, "protagonist", base.model_dump(exclude_none=True)
+    )
+    if data.get("avatar_url") and not data.get("avatar_variants"):
+        data["avatar_variants"] = _avatar_variants_out(None, data["avatar_url"])
+    return CharDraftOut(**data)
 
 
 @router.put("/rooms/{room_id}/me-card", response_model=MemberOut)
@@ -675,8 +1335,24 @@ async def update_my_card(
         member.voice_ref_url = body.voice_ref_url
     if body.voice_ref_text is not None:
         member.voice_ref_text = body.voice_ref_text
+    if body.voice_variants is not None:
+        member.voice_variants = _voice_variants_json(
+            body.voice_variants,
+            member.voice_ref_url,
+            member.voice_id,
+            member.voice_ref_text,
+        )
+    if body.avatar_variants is not None:
+        member.avatar_variants = _avatar_variants_json(
+            body.avatar_variants, body.avatar_url or member.avatar_url
+        )
     if body.avatar_url is not None:
-        member.avatar_url = body.avatar_url
+        _add_avatar_variant(
+            member,
+            body.avatar_url,
+            label="选用头像",
+            source="selected",
+        )
     if body.reset_stats or member.stats is None:
         member.stats = json.dumps(
             initial_stats_from_card(member.character_name, member.persona),
@@ -773,10 +1449,117 @@ async def character_options(
             appearance=appearance,
             voice_id=d.get("voice_id"),
             avatar_url=avatar_url,
+            avatar_variants=_avatar_variants_out(None, avatar_url),
         )
 
     out = await asyncio.gather(*(draft_out(d) for d in drafts))
     return out
+
+
+@router.post("/rooms/{room_id}/design-character", response_model=CharDraftOut)
+async def design_character(
+    room_id: int,
+    body: CharOptionsIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> CharDraftOut:
+    """AI 角色设计师：描述 → 结构化角色 draft（含 Danbooru appearance tag）。"""
+    await _require_member(session, room_id, user.id)
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="room not found")
+    try:
+        drafts = await generate_character_options(
+            room.world_card, body.hint, 1
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI 角色设计失败",
+        ) from exc
+    if not drafts:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI 没有生成可用角色",
+        )
+    d = drafts[0]
+    return CharDraftOut(
+        name=d["name"],
+        persona=d.get("persona", ""),
+        appearance=d.get("appearance"),
+        voice_id=d.get("voice_id"),
+    )
+
+
+@router.post("/rooms/{room_id}/design-scene", response_model=SceneDesignOut)
+async def design_scene(
+    room_id: int,
+    body: SceneDesignIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> SceneDesignOut:
+    """AI 场景设计师：描述 + 上下文 → 场景类型/气氛/潜在 NPC。"""
+    await _require_member(session, room_id, user.id)
+    # 取最近对话作为上下文
+    history = await messages_after(session, room_id, 0, limit=30)
+    context = "\n".join(
+        f"{m.speaker_label}: {m.content}"
+        for m in history[-16:]
+        if m.author_type in {"user", "ai"}
+    ) or "（暂无对话）"
+    brain = default_provider()
+    brain.temperature = 0.5
+    brain.max_tokens = 800
+    try:
+        raw = await brain.complete(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是场景设计师。根据场景名、玩家描述和最近的剧情对话，"
+                        "设计这个场景的类型、气氛和潜在 NPC。"
+                        "只输出 JSON，不要多余文字：\n"
+                        '{"scene_type":"safe/dangerous/empty/populated",'
+                        '"atmosphere":"英文氛围描述，用于生图背景",'
+                        '"potential_npcs":[{"name":"中文名",'
+                        '"persona":"身份+性格",'
+                        '"appearance":"Danbooru英文tag"}],'
+                        '"scene_intro":"一句中文气氛描写"}'
+                        "如果这个场景应该没有 NPC，potential_npcs 为空数组。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"场景名：{body.scene_name}\n"
+                        f"玩家描述：{body.description or '（无）'}\n"
+                        f"最近剧情：\n{context[:2000]}"
+                    ),
+                },
+            ]
+        )
+        data = json.loads(raw)
+    except Exception:
+        data = {}
+    scene_type = str(data.get("scene_type") or "empty").strip()
+    if scene_type not in ("safe", "dangerous", "empty", "populated"):
+        scene_type = "empty"
+    return SceneDesignOut(
+        scene_name=body.scene_name,
+        scene_type=scene_type,
+        atmosphere=str(data.get("atmosphere") or "")[:512],
+        potential_npcs=[
+            {
+                "name": n.get("name", ""),
+                "persona": n.get("persona", ""),
+                "appearance": n.get("appearance", ""),
+            }
+            for n in (data.get("potential_npcs") or [])[:3]
+            if isinstance(n, dict) and n.get("name")
+        ],
+        scene_intro=str(data.get("scene_intro") or "")[:200],
+        unlocked=True,
+    )
 
 
 @router.post("/rooms/{room_id}/npcs", response_model=NpcCardOut)
@@ -797,7 +1580,7 @@ async def create_npc(
     await session.commit()
     await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return NpcCardOut.model_validate(npc)
+    return _npc_card_out(npc)
 
 
 @router.post("/rooms/{room_id}/npcs/generate", response_model=list[NpcCardOut])
@@ -841,7 +1624,12 @@ async def generate_npcs_endpoint(
                     seed=char_seed(room_id, npc.name),
                 )
                 if result.get("url"):
-                    npc.avatar_url = result["url"]
+                    _add_avatar_variant(
+                        npc,
+                        result["url"],
+                        label="AI 生成头像",
+                        source="generated",
+                    )
             except Exception:
                 pass
         if settings.voice_generation_enabled:
@@ -853,7 +1641,7 @@ async def generate_npcs_endpoint(
     for npc in created:
         await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return [NpcCardOut.model_validate(npc) for npc in created]
+    return [_npc_card_out(npc) for npc in created]
 
 
 @router.put("/rooms/{room_id}/npcs/{npc_id}", response_model=NpcCardOut)
@@ -880,7 +1668,7 @@ async def update_npc(
     await session.commit()
     await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return NpcCardOut.model_validate(npc)
+    return _npc_card_out(npc)
 
 
 @router.delete("/rooms/{room_id}/npcs/{npc_id}")
@@ -916,22 +1704,69 @@ async def generate_my_avatar(
     if member is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
-        )
+    )
     _room_avatar = await session.get(Room, room_id)
     _nsfw_avatar = _room_avatar is not None and _room_avatar.world_card == "ksim"
+    variant_count = len(member.avatar_variants) if member.avatar_variants else 0
     result = await generate_portrait(
         member.appearance or member.character_name or "1person",
         name=member.character_name,
         persona=member.persona,
         nsfw=_nsfw_avatar,
-        seed=char_seed(room_id, member.character_name or str(member.user_id)),
+        seed=char_seed(room_id, member.character_name or str(member.user_id))
+        + variant_count,
     )
     if not result.get("url"):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=result.get("error", "生成头像失败"),
         )
-    member.avatar_url = result["url"]
+    _add_avatar_variant(
+        member,
+        result["url"],
+        label="重生头像",
+        source="generated",
+    )
+    await session.commit()
+    await session.refresh(member)
+    await _broadcast_cards_changed(room_id)
+    return _member_card(member, user.display_name)
+
+
+@router.put("/rooms/{room_id}/me-card/avatar/current", response_model=MemberOut)
+async def select_my_avatar(
+    room_id: int, body: AvatarSelectIn, user: CurrentUser, session: SessionDep
+) -> MemberOut:
+    member = await session.scalar(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
+        )
+    _select_avatar_variant(member, body.avatar_url)
+    await session.commit()
+    await session.refresh(member)
+    await _broadcast_cards_changed(room_id)
+    return _member_card(member, user.display_name)
+
+
+@router.put("/rooms/{room_id}/me-card/voice/current", response_model=MemberOut)
+async def select_my_voice(
+    room_id: int, body: VoiceSelectIn, user: CurrentUser, session: SessionDep
+) -> MemberOut:
+    member = await session.scalar(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
+        )
+    _select_voice_variant(member, body.voice_ref_url)
     await session.commit()
     await session.refresh(member)
     await _broadcast_cards_changed(room_id)
@@ -955,23 +1790,171 @@ async def generate_npc_avatar(
         )
     _room_npca = await session.get(Room, room_id)
     _nsfw_npca = _room_npca is not None and _room_npca.world_card == "ksim"
+    variant_count = len(npc.avatar_variants) if npc.avatar_variants else 0
     result = await generate_portrait(
         npc.appearance or npc.name or "1person",
         name=npc.name,
         persona=npc.persona,
         nsfw=_nsfw_npca,
-        seed=char_seed(room_id, npc.name),
+        seed=char_seed(room_id, npc.name) + variant_count,
     )
     if not result.get("url"):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=result.get("error", "生成头像失败"),
         )
-    npc.avatar_url = result["url"]
+    _add_avatar_variant(
+        npc,
+        result["url"],
+        label="重生头像",
+        source="generated",
+    )
     await session.commit()
     await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return NpcCardOut.model_validate(npc)
+    return _npc_card_out(npc)
+
+
+@router.put("/rooms/{room_id}/npcs/{npc_id}/avatar/current", response_model=NpcCardOut)
+async def select_npc_avatar(
+    room_id: int,
+    npc_id: int,
+    body: AvatarSelectIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
+        )
+    _select_avatar_variant(npc, body.avatar_url)
+    await session.commit()
+    await session.refresh(npc)
+    await _broadcast_cards_changed(room_id)
+    return _npc_card_out(npc)
+
+
+@router.post("/rooms/{room_id}/npcs/{npc_id}/evolve", response_model=NpcCardOut)
+@router.put("/rooms/{room_id}/npcs/{npc_id}/evolve", response_model=NpcCardOut)
+async def evolve_npc(
+    room_id: int,
+    npc_id: int,
+    user: CurrentUser,
+    session: SessionDep,
+) -> NpcCardOut:
+    """根据 NPC 当前人设（可能已通过剧情自动丰富）调整外貌 tag → 重生头像。"""
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(status_code=404, detail="npc not found")
+    room = await session.get(Room, room_id)
+    nsfw = room is not None and room.world_card == "ksim"
+    current_persona = npc.persona or ""
+    old_appearance = npc.appearance or ""
+    brain = default_provider()
+    brain.temperature = 0.4
+    brain.max_tokens = 600
+    try:
+        raw = await brain.complete(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "根据角色的当前人设，调整外貌描述"
+                        "（Danbooru 风格英文 tag）。不改变基础外貌特征，"
+                        "只根据人设增删对应特征的 tag。"
+                        "只输出调整后的英文外貌 tag，不要多余文字。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"角色当前人设：{current_persona}\n"
+                        f"当前外貌 tag：{old_appearance}"
+                    ),
+                },
+            ]
+        )
+        new_appearance = raw.strip().strip("\"'").strip(" ,")[:512] or old_appearance
+    except Exception:
+        new_appearance = old_appearance
+    npc.appearance = new_appearance
+    result = await generate_portrait(
+        new_appearance or npc.name,
+        name=npc.name,
+        persona=current_persona,
+        nsfw=nsfw,
+        seed=char_seed(room_id, npc.name),
+    )
+    if result.get("url"):
+        _add_avatar_variant(npc, result["url"], label="进化", source="evolved")
+    await session.commit()
+    await session.refresh(npc)
+    await _broadcast_cards_changed(room_id)
+    return _npc_card_out(npc)
+
+
+@router.post("/rooms/{room_id}/me-card/evolve", response_model=MemberOut)
+@router.put("/rooms/{room_id}/me-card/evolve", response_model=MemberOut)
+async def evolve_my_card(
+    room_id: int, body: NpcEvolveIn, user: CurrentUser, session: SessionDep
+) -> MemberOut:
+    """玩家角色追加人设 → AI 微调外貌 tag → 重生头像。"""
+    member = await session.scalar(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if member is None:
+        raise HTTPException(status_code=403, detail="not a member")
+    room = await session.get(Room, room_id)
+    nsfw = room is not None and room.world_card == "ksim"
+    old_persona = member.persona or ""
+    old_appearance = member.appearance or ""
+    new_persona, new_appearance = await _evolve_member_card_fields(
+        name=member.character_name,
+        old_persona=old_persona,
+        old_appearance=old_appearance,
+        persona_add=body.persona_add,
+    )
+    member.persona = new_persona[:4000]
+    member.appearance = new_appearance
+    result = await generate_portrait(
+        new_appearance or member.character_name or "1person",
+        name=member.character_name,
+        persona=new_persona,
+        nsfw=nsfw,
+        seed=char_seed(room_id, member.character_name or str(member.user_id)),
+    )
+    if result.get("url"):
+        _add_avatar_variant(member, result["url"], label="进化", source="evolved")
+    await session.commit()
+    await session.refresh(member)
+    await _broadcast_cards_changed(room_id)
+    return _member_card(member, user.display_name)
+
+
+@router.put("/rooms/{room_id}/npcs/{npc_id}/voice/current", response_model=NpcCardOut)
+async def select_npc_voice(
+    room_id: int,
+    npc_id: int,
+    body: VoiceSelectIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> NpcCardOut:
+    await _require_member(session, room_id, user.id)
+    npc = await session.get(NpcCard, npc_id)
+    if npc is None or npc.room_id != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="npc not found"
+        )
+    _select_voice_variant(npc, body.voice_ref_url)
+    await session.commit()
+    await session.refresh(npc)
+    await _broadcast_cards_changed(room_id)
+    return _npc_card_out(npc)
 
 
 @router.post("/rooms/{room_id}/npcs/{npc_id}/voice", response_model=NpcCardOut)
@@ -993,7 +1976,7 @@ async def generate_npc_voice(
     await session.commit()
     await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return NpcCardOut.model_validate(npc)
+    return _npc_card_out(npc)
 
 
 @router.put("/rooms/{room_id}/npcs/{npc_id}/active", response_model=NpcCardOut)
@@ -1014,7 +1997,7 @@ async def set_npc_active(
     await session.commit()
     await session.refresh(npc)
     await _broadcast_cards_changed(room_id)
-    return NpcCardOut.model_validate(npc)
+    return _npc_card_out(npc)
 
 
 @router.post("/rooms/{room_id}/tts", response_model=TtsOut)

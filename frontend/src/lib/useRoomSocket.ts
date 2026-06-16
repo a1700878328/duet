@@ -42,8 +42,9 @@ interface UseRoomSocketResult {
   advance: (npcId?: number) => void;
   timeskip: () => void;
   describeScene: () => void;
-  requestImage: () => void;
-  godWhisper: (content: string) => void;
+  requestImage: (customPrompt?: string, characters?: string[], designedAppearance?: string) => void;
+  moveNpcs: (scene: string, npcs: string[]) => void;
+  godWhisper: (params: { content?: string; target_npc?: string; scene?: string; action?: string }) => void;
   gotoScene: (scene: string) => void;
   payNpc: (npcId: number, amount: number) => void;
   setTyping: (isTyping: boolean) => void;
@@ -324,20 +325,34 @@ export function useRoomSocket({
   }, [send]);
 
   const requestImage = useCallback(
-    () => {
+    (customPrompt?: string, characters?: string[], designedAppearance?: string) => {
       setImaging(true);
-      send({ type: "image" });
+      const msg: Record<string, unknown> = { type: "image" };
+      if (customPrompt) msg.custom_prompt = customPrompt;
+      if (characters && characters.length > 0) msg.characters = characters;
+      if (designedAppearance) msg.designed_appearance = designedAppearance;
+      send(msg as WsClientEvent);
+    },
+    [send],
+  );
+
+  const moveNpcs = useCallback(
+    (scene: string, npcs: string[]) => {
+      send({ type: "move", scene, npcs });
     },
     [send],
   );
 
   const godWhisper = useCallback(
-    (content: string) => {
-      const trimmed = content.trim();
-      if (trimmed) {
-        setAiBusy(true);
-        send({ type: "god_whisper", content: trimmed });
-      }
+    (params: { content?: string; target_npc?: string; scene?: string; action?: string }) => {
+      const msg: Record<string, unknown> = { type: "god_whisper" };
+      if (params.content?.trim()) msg.content = params.content.trim();
+      if (params.target_npc) msg.target_npc = params.target_npc;
+      if (params.scene) msg.scene = params.scene;
+      if (params.action?.trim()) msg.action = params.action.trim();
+      if (!msg.content && !msg.target_npc) return;
+      setAiBusy(true);
+      send(msg as WsClientEvent);
     },
     [send],
   );
@@ -382,6 +397,7 @@ export function useRoomSocket({
     timeskip,
     describeScene,
     requestImage,
+    moveNpcs,
     godWhisper,
     gotoScene,
     payNpc,

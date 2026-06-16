@@ -25,7 +25,9 @@ VOICE_PROVIDER = settings.voice_provider.strip().lower() or "auto"
 ELEVEN_API_BASE = settings.eleven_api_base.rstrip("/")
 ELEVEN_API_KEY = settings.eleven_api_key.strip()
 ELEVEN_API_KEY_FILE = settings.eleven_api_key_file.strip()
-ELEVEN_DESIGN_MODEL = settings.eleven_voice_design_model.strip() or "eleven_ttv_v3"
+ELEVEN_DESIGN_MODEL = (
+    settings.eleven_voice_design_model.strip() or "eleven_multilingual_ttv_v2"
+)
 ELEVEN_TTS_MODEL = settings.eleven_tts_model.strip() or "eleven_v3"
 ELEVEN_OUTPUT_FORMAT = settings.eleven_output_format.strip() or "mp3_44100_128"
 ELEVEN_DESIGN_LOUDNESS = settings.eleven_design_loudness
@@ -46,6 +48,8 @@ FISH_CHUNK_LENGTH = settings.fish_tts_chunk_length
 FISH_SPEED = settings.fish_tts_speed
 FISH_VOLUME = settings.fish_tts_volume
 FISH_PERFORMANCE_TAGS_ENABLED = settings.fish_performance_tags_enabled
+VOICE_PREVIEW_MAX_CHARS = 120
+VOICE_REFERENCE_PAYLOAD_MAX_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,34 @@ class DesignedVoice:
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return min(max(v, lo), hi)
+
+
+def _log_voice_failure(
+    stage: str, exc: Exception | None = None, detail: str = ""
+) -> None:
+    """Print provider failures without leaking API keys or full payloads."""
+    bits = [
+        f"[VOICE] stage={stage}",
+        f"provider={_active_provider()}",
+        f"fish_model={FISH_MODEL}",
+        f"eleven_design_model={ELEVEN_DESIGN_MODEL}",
+    ]
+    if detail:
+        bits.append(f"detail={detail[:320]}")
+    if exc is not None:
+        if isinstance(exc, httpx.HTTPStatusError):
+            resp = exc.response
+            body = ""
+            try:
+                body = resp.text[:500]
+            except Exception:
+                body = "<unreadable>"
+            bits.append(f"status={resp.status_code}")
+            if body:
+                bits.append(f"body={body!r}")
+        else:
+            bits.append(f"error={type(exc).__name__}: {str(exc)[:500]}")
+    print(" ".join(bits), flush=True)
 
 
 def _read_text_file(path_value: str) -> str:
@@ -111,13 +143,20 @@ def _fallback_reference_id(description: str) -> str:
 
 def _ensure_preview_text(text: str) -> str:
     preview = re.sub(r"\s+", " ", text.strip())
-    filler = (
-        " 我会根据你的情绪调整语气，保持自然的停顿和清晰的表达，"
-        "让每一句话都像角色本人正在认真回应。"
+    preview = preview.replace(
+        "我会根据你的情绪调整语气，保持自然的停顿和清晰的表达，"
+        "让每一句话都像角色本人正在认真回应。",
+        "",
     )
-    while len(preview) < 100:
-        preview += filler
-    return preview[:1000]
+    if not preview:
+        preview = "你好，我准备好了。"
+    # ElevenLabs Voice Design API requires text >= 100 characters.
+    if len(preview) < 100:
+        core = preview[:80].rstrip("。.!！")
+        preview = f"{core}……{core}，我说的你都明白了吧。"
+        while len(preview) < 100:
+            preview = f"{preview} {core}，明白了吗？"
+    return preview[:VOICE_PREVIEW_MAX_CHARS]
 
 
 def _anime_voice_description(description: str) -> str:
@@ -194,7 +233,8 @@ class VoiceClient:
                 return {
                     v["voice_id"] for v in data.get("voices", []) if v.get("voice_id")
                 }
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_voices", exc)
             return set()
 
     async def resolve_voice(self, voice_id: str | None) -> str:
@@ -258,11 +298,15 @@ class VoiceClient:
         key = _eleven_key()
         if not key:
             return None
+        # 使用角色特色的参考台词（padded to >=100 chars for ElevenLabs）
         preview_text = _ensure_preview_text(reference_text)
+        # Deterministic seed per character description for consistent voice design.
+        design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,
             "text": preview_text,
+            "seed": design_seed,
             "loudness": _clamp(ELEVEN_DESIGN_LOUDNESS, -1.0, 1.0),
             "guidance_scale": _clamp(ELEVEN_DESIGN_GUIDANCE_SCALE, 0.0, 100.0),
             "stream_previews": False,
@@ -276,15 +320,18 @@ class VoiceClient:
                     json=payload,
                 )
                 resp.raise_for_status()
-                preview = resp.json()["previews"][0]
+                data = resp.json()
+                preview = data["previews"][0]
+                gen_text = data.get("text") or ""
                 return DesignedVoice(
                     voice_id="",
                     reference_audio=base64.b64decode(preview["audio_base_64"]),
-                    reference_text=preview_text,
+                    reference_text=gen_text,
                     voice_description=voice_description,
                     provider="eleven",
                 )
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_design_reference", exc)
             return None
 
     async def _design_eleven_voice(
@@ -299,10 +346,12 @@ class VoiceClient:
             return None
         headers = {"xi-api-key": key, "Content-Type": "application/json"}
         preview_text = _ensure_preview_text(reference_text)
+        design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,
             "text": preview_text,
+            "seed": design_seed,
             "loudness": _clamp(ELEVEN_DESIGN_LOUDNESS, -1.0, 1.0),
             "guidance_scale": _clamp(ELEVEN_DESIGN_GUIDANCE_SCALE, 0.0, 100.0),
             "stream_previews": False,
@@ -316,8 +365,10 @@ class VoiceClient:
                     json=payload,
                 )
                 resp.raise_for_status()
-                preview = resp.json()["previews"][0]
+                data = resp.json()
+                preview = data["previews"][0]
                 audio = base64.b64decode(preview["audio_base_64"])
+                gen_text = data.get("text") or ""
                 generated_voice_id = preview["generated_voice_id"]
                 native_voice_id = ""
                 if ELEVEN_CLONE_DESIGN_PREVIEW:
@@ -341,11 +392,12 @@ class VoiceClient:
                 return DesignedVoice(
                     voice_id=f"eleven:{native_voice_id}",
                     reference_audio=audio,
-                    reference_text=preview_text,
+                    reference_text=gen_text,
                     voice_description=voice_description,
                     provider="eleven",
                 )
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_design_voice", exc)
             return None
 
     async def _clone_eleven_preview(
@@ -373,7 +425,8 @@ class VoiceClient:
             )
             resp.raise_for_status()
             return str(resp.json().get("voice_id") or "")
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_clone_preview", exc)
             return ""
 
     async def _save_eleven_preview(
@@ -397,7 +450,8 @@ class VoiceClient:
             )
             resp.raise_for_status()
             return str(resp.json().get("voice_id") or generated_voice_id)
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_save_preview", exc)
             return ""
 
     def _performance_tags(self, text: str, reference_text: str | None) -> list[str]:
@@ -415,9 +469,9 @@ class VoiceClient:
                 tags.append(tag)
 
         if re.search(r"(哈|呵|嘻|嘿|笑|哎呀|呀|嘛|哦|呢|~|～)", ctx):
-            add("teasing")
+            add("happy")
         if re.search(r"(缺钱|利息|契约|账|债|逾期|偿还|客人|商人|骑士大人)", ctx):
-            add("soft laugh")
+            add("chuckling")
         if re.search(r"(小声|悄悄|秘密|靠近|耳边|别告诉|嘘)", ctx):
             add("whispering")
         if re.search(r"(害怕|紧张|糟糕|怎么办|不、不|没、没|危险)", line):
@@ -425,15 +479,15 @@ class VoiceClient:
         if re.search(r"(生气|够了|闭嘴|不许|混蛋|竟敢|骗我)", line):
             add("angry")
         if re.search(r"(叹|唉|疲惫|难过|哭|抱歉|对不起)", line):
-            add("sigh")
+            add("sighing")
         if re.search(r"(等等|快|太好了|真的|？！|!|！)", line):
             add("excited")
         if "…" in line or "..." in line:
-            add("soft voice")
+            add("soft tone")
         if re.search(r"(冷笑|嘲笑|轻笑|笑)", line):
             add("chuckling")
         if not tags and re.search(r"(可爱|少女|软萌|亲近|温柔|甜)", ctx):
-            add("bright")
+            add("happy")
         return tags
 
     def _decorate_text(self, text: str, reference_text: str | None = None) -> str:
@@ -471,10 +525,13 @@ class VoiceClient:
         self, text: str, reference_audio: bytes, reference_text: str
     ) -> dict[str, Any]:
         payload = self._fish_payload(text, "", reference_text)
+        ref_text = (reference_text.strip() or "你好，很高兴见到你。")[
+            :VOICE_REFERENCE_PAYLOAD_MAX_CHARS
+        ]
         payload["references"] = [
             {
                 "audio": reference_audio,
-                "text": reference_text.strip()[:1000] or "你好，很高兴见到你。",
+                "text": ref_text,
             }
         ]
         payload.pop("reference_id", None)
@@ -515,6 +572,10 @@ class VoiceClient:
         key = _eleven_key()
         native_voice_id = await self.resolve_voice(voice_id)
         if not key or not native_voice_id:
+            _log_voice_failure(
+                "eleven_synth",
+                detail=f"missing {'api_key' if not key else 'voice_id'}",
+            )
             return None
         payload = {
             "text": text[:5000],
@@ -538,7 +599,8 @@ class VoiceClient:
                 )
                 resp.raise_for_status()
                 return resp.content
-        except Exception:
+        except Exception as exc:
+            _log_voice_failure("eleven_synth", exc)
             return None
 
     async def _synth_fish(
@@ -550,6 +612,7 @@ class VoiceClient:
         reference_text: str | None = None,
     ) -> bytes | None:
         if not FISH_API_KEY:
+            _log_voice_failure("fish_synth", detail="missing FISH_API_KEY")
             return None
         reference_id = await self.resolve_voice(voice_id)
         headers: dict[str, str] = {
@@ -580,7 +643,13 @@ class VoiceClient:
                 resp = await client.post(f"{FISH_API_BASE}/v1/tts", **kwargs)
                 resp.raise_for_status()
                 return resp.content
-        except Exception:
+        except Exception as exc:
+            ref_kind = "audio_reference" if reference_audio_path else "reference_id"
+            _log_voice_failure(
+                "fish_synth",
+                exc,
+                detail=f"ref_kind={ref_kind} has_reference_id={bool(reference_id)}",
+            )
             return None
 
 

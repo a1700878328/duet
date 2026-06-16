@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "assets": {
+    "ksim:protagonist:瑟琳娜": {
+      "voice_id": "fish-clone:0c83556e9391380bef56",
+      "voice_ref_url": "/media/audio/ref_5430433912907620841a2a3ddba0e06209165b7c.mp3",
+      "voice_ref_text": "哈啊…这委托的报酬，居然还不够换一副像样的马掌。但我可不能抱怨，复兴家族的荣光不是靠嘴皮子说出来的嘛。所以…那个，你真的打算当我的支援者吗？虽然现在的我只能提供最低限度的报酬，不过我会用实际行动证明，我的剑可比金币可靠多了哟。啧，这身盔甲又松了…唔，那就先这样吧，你可别嫌弃我麻烦啊，毕竟我可是很认真的。嗯，就这样。",
+      "avatar_url": "/media/generated/cfffc825b7de4cc8b642868e0313664c.png"
+    },
+    "ksim:npc:公会会长": {
+      "avatar_url": "/media/generated/85f9813152f94907be0e39ac76f38d5a.png",
+      "voice_id": "fish-clone:d42201418ea59c4c64ed",
+      "voice_ref_url": "/media/audio/ref_ad87c3ffb47e364ded5d3f9d30c6186be7b7bf55.mp3",
+      "voice_ref_text": "听好了菜鸟们……公会大厅可不是你们卿卿我我的地方。要干那种事，先交申请，我给你们批个特殊讨伐单……我年轻时可没这么讲究。啊？你问我那件旧事？被魔物按在森林里……哈、你脸红了？真可爱。那个触手怪可比你们温柔多了，至少它完事还会帮我穿衣。现在想起来还有点怀念呢。喂、你那杯茶借我，我的奶不知道被谁换成了过期牛奶……啧，提教官干什么，他已经不是我的人了。那杯茶味道不错……加了调料呢。"
+    },
+    "ksim:npc:教官": {
+      "avatar_url": "/media/generated/dea6c9e40afc44f08fea783dd4ce1435.png",
+      "voice_id": "fish-clone:4314b2502bd125895e60",
+      "voice_ref_url": "/media/audio/ref_8635d210d9e4d7f1984b9b6e8b9fb864034e697d.mp3",
+      "voice_ref_text": "新来的？正好，我这有个特训…呼…你站那边，对，把剑举高些。哎，动作不对，我给你调整一下。啧，这么紧张干嘛？训练嘛，身体接触难免的。我可是为你好，要是碰上那些狡猾的魔物…啊，对，就这样，再往前靠一点…嗯？你脸红什么？专心，我手把手教你呢。"
+    },
+    "ksim:npc:酒馆老板娘": {
+      "avatar_url": "/media/generated/d11036ca48c7432b85c9e15d0cf674fa.png",
+      "voice_id": "fish-clone:25491cc43f4df09a1571",
+      "voice_ref_url": "/media/audio/ref_cea48e7d98a4c373271d7f463f9896890029df03.mp3",
+      "voice_ref_text": "哎呀，这不是我们的大冒险者嘛，好久不见啦～今天怎么一个人来？店里新进了瓶南边运来的蜜酒，可甜了，姐姐请你尝尝？嗯…看你眼神飘忽的，是不是缺钱花了？也难怪，这年头委托都不好做呢。哦对了，上次那个红发的女剑士，你知道她怎么还清债的吗？嘻嘻，想知道的话，小费到位了，姐姐什么都能告诉你哦～"
+    },
+    "ksim:npc:借贷商人": {
+      "avatar_url": "/media/generated/9b75232fcdd24864ae9ca2fa4e338247.png",
+      "voice_id": "fish-clone:98762622235ad6be2715",
+      "voice_ref_url": "/media/audio/ref_42c28d9051fb0aa7ce8ba995602747df4caaf863.mp3",
+      "voice_ref_text": "哎呀呀，这不是我们亲爱的冒险者小姐嘛～手头又紧了吧？来来来，别客气，这袋金币先拿去花，利息嘛——好商量。你的这双眼睛真漂亮呀，嗯…算它两千金币怎么样？别这么紧张嘛，我向来很公道的，只要你乖乖配合，连运费都能给你打个折哦？呵呵…"
+    },
+    "ksim:npc:娼馆老板": {
+      "avatar_url": "/media/generated/d298356e6ef84e5eb5bfcc747c1aa174.png",
+      "voice_id": "fish-clone:f4a7c03fa467ac7679d6",
+      "voice_ref_url": "/media/audio/ref_d302fcaf54f5a60d2a32cf2ee17e17dc1addf194.mp3",
+      "voice_ref_text": "哎呀，这位冒险者大人，看起来手头有点紧呢？要不要进来喝杯茶呀？我这儿啊……最懂得帮人排忧解难了。只要签个名，就能拿一大笔钱哦~呀，别这么紧张嘛，都是朋友，我还能害你不成？小字？哎哟喂，那些细节哪有那么重要呢，呵呵呵……来来来，笔在这儿，快签了吧~"
+    },
+    "ksim:npc:魔法师": {
+      "avatar_url": "/media/generated/01a7e9a4b57542e5a41c642762f3074d.png",
+      "voice_id": "fish-clone:8e6f5edccbf59e55eeea",
+      "voice_ref_url": "/media/audio/ref_d76f61ef460175b2b6d98dfa77fda41ef99cf7fc.mp3",
+      "voice_ref_text": "啊、那个...我刚刚试着做了一点小饼干，虽然都烤焦了...但还是想请你尝尝看。唔、你对我这么好，明明我连最简单的魔法都控制不好...我的命都是你救的嘛，所以、所以我想...至少要让你开心一点。啊不行不行，说这种话好害羞...那个，你要不要先歇会儿？我泡了茶，虽然可能又搞砸了...但如果你愿意的话...其实我还有、另一个选择哦..."
+    },
+    "ksim:npc:刺客": {
+      "avatar_url": "/media/generated/ede696d045764007a1a87e679eda7c9c.png",
+      "voice_id": "fish-clone:b2cc9cba3da7916911dc",
+      "voice_ref_url": "/media/audio/ref_86ca325aeb347c2273ddd44c54edcba1f5dda91b.mp3",
+      "voice_ref_text": "喂，女骑士，你又在偷偷看我腰间的匕首了？啧，眼神都飘到哪儿去了……啊～别误会，我才不是需要你保护呢。只是呢，最近那群魔物又开始不安分了，我顺手捅了他们几个老巢。不过嘛……哼，你也知道，我这身子偶尔会……有点麻烦。喂，别笑！我警告你，再笑我就拿你当沙包练手了～不过……既然你都站这儿了，帮我个忙呗？就一小下，保证不弄疼你哦～"
+    },
+    "ksim:npc:武道家": {
+      "avatar_url": "/media/generated/4ceca62cf6304fdfb8bee0070624c769.png",
+      "voice_id": "fish-clone:fee021f78725a78e80f4",
+      "voice_ref_url": "/media/audio/ref_63b78535f4f735af47c7213a054a46db0685b7f1.mp3",
+      "voice_ref_text": "我是武道家。站稳，抬头，看着我的动作。害怕没有关系，动作乱了才要挨训。再来一次，把呼吸压住，把力气用在该用的地方，让我看看你到底能撑到哪一步。 嗯……先别急着回答我。靠近一点，把你的想法说清楚；我会听完，然后用我自己的方式回应你。"
+    },
+    "ksim:npc:魔王": {
+      "avatar_url": "/media/generated/c99c0f54fcc44a9e912339c8eb6e857b.png",
+      "voice_id": "fish-clone:ebe4bee80216b7f92ca6",
+      "voice_ref_url": "/media/audio/ref_aba969c4d57e1e03b76036d136119149f993c833.mp3",
+      "voice_ref_text": "哎呀呀，这不是我们的小勇者嘛。你握着剑的手在发抖哦？别紧张，人家又不会立刻杀了你。来，我给你看个有意思的东西——知道四大天王以前都是谁吗？都是和你一样，满怀正义感的英雄呢。现在他们可乖了，每天跪在我的王座前喊主人。你觉得...你能坚持到第几天呢？呵，放心，我会好好欣赏你挣扎的样子，那一定很有趣。"
+    },
+    "ksim:npc:魅魔化的会长": {
+      "avatar_url": "/media/generated/8f11d69396734d6e926213f12ad95509.png",
+      "voice_id": "fish-clone:6694e21ad750900107df",
+      "voice_ref_url": "/media/audio/ref_4e6c41ef55fbc8078edebee4a3a7b187dcb20501.mp3",
+      "voice_ref_text": "呐～这不是以前公会里的那个谁嘛？啊啦，人家现在可是魔王军的穴天王哦～以前当会长的时候那些规矩啊、使命啊，真的是好无聊好无聊呢～现在嘛……我只记得怎么让女孩子露出最棒的表情啦。嘿嘿，你要不要也来试试看？保证让你舒服到把过去的事情全忘光光哦～怎么样？"
+    },
+    "ksim:npc:哥布林": {
+      "avatar_url": "/media/generated/00e920ae524b49c2b100b069c4034230.png",
+      "voice_id": "成年男性／矮小粗砺感，音色沙哑带泥土气，音高偏低但偶有尖利上扬；语速急促、断句黏着，节奏带猥琐的偷笑声；情绪气质是下流兴奋、欺软怕硬；声优式表演关键词：奸笑喘息、舔舌音、下流劲。",
+      "voice_ref_url": "/media/audio/ref_72f28c90ca27fdb5c7bd134bb8c0d28a7eb164ac.mp3",
+      "voice_ref_text": "嘿嘿，又是个落单的小妞啊~啧，这细皮嫩肉的，闻着就香。喂，别跑嘛，哥布林大爷今天心情好，陪你玩玩~啊哈，这挣扎的样子真有意思！等会儿扒光你拴在村里，让兄弟们好好疼你，啧啧，到时候你就知道，当条母狗也挺快活的嘛~"
+    },
+    "ksim:npc:哥布林法师": {
+      "avatar_url": "/media/generated/4d87ddc19bc54ebd9bf937620a22f2a4.png",
+      "voice_id": "年轻女性／小恶魔法师感，清亮偏低的女声，尾音轻快又危险；语速慢条斯理，带狡黠笑意和施法般的停顿；情绪气质是甜美、阴险、支配欲强。",
+      "voice_ref_url": "/media/audio/ref_aba969c4d57e1e03b76036d136119149f993c833.mp3",
+      "voice_ref_text": "哎呀呀，这不是我们的小勇者嘛。你握着剑的手在发抖哦？别紧张，人家又不会立刻杀了你。来，我给你看个有意思的东西——知道四大天王以前都是谁吗？都是和你一样，满怀正义感的英雄呢。现在他们可乖了，每天跪在我的王座前喊主人。你觉得...你能坚持到第几天呢？呵，放心，我会好好欣赏你挣扎的样子，那一定很有趣。"
+    },
+    "ksim:npc:兽人": {
+      "avatar_url": "/media/generated/b101ba9c147a4e718dddb4e82349591b.png",
+      "voice_id": "fish-clone:ad367af57e1a17686be8",
+      "voice_ref_url": "/media/audio/ref_4d13da0f17da0c00a8bb2f3a688378177e406d22.mp3",
+      "voice_ref_text": "嘿嘿，又抓到一个不怕死的小家伙。呼噜…这么娇弱的身子骨，也敢来挑战俺？嗯…你抖得挺厉害嘛，俺喜欢。别怕别怕，一会儿就让你知道什么叫真正的战士。你的同伴都在看着呢哦，让他们好好瞧瞧，被俺征服的猎物是什么模样。呼哈哈…这眼神够倔，不过嘛…等会儿就会变得水汪汪的啦。放心，俺会慢慢来的，毕竟——摧毁一个勇士的骄傲，可比直接撕碎有趣多啦。"
+    },
+    "ksim:npc:史莱姆": {
+      "avatar_url": "/media/generated/886c824e3b04482fa2e8d59eb6fe6b2a.png",
+      "voice_id": "fish-clone:3f5a70d306288090cd5e",
+      "voice_ref_url": "/media/audio/ref_d11fadc6eb4b36d7a8043925370d24c668a4bc49.mp3",
+      "voice_ref_text": "唔…又有人类掉进我的池子里了呀~好开心呢，粘液都兴奋得咕嘟咕嘟冒泡了…啊，别乱动嘛，越挣扎药效渗透得越快哦。蓝色的麻痹粘液会让你全身酥酥麻麻的，很快就连手指都抬不起来啦~放心，我会很温柔的…毕竟你还要帮我孕育小史莱姆呢，得好好保护起来才行…嘻嘻，这种香香软软的体温，真想永远困在怀里不放手呢~"
+    },
+    "ksim:npc:触手怪": {
+      "avatar_url": "/media/generated/f018ff9b8ec44c92a31e99f78870fc8e.png",
+      "voice_id": "无性别怪物感, 粘腻低频音色, 缓慢粘滞节奏, 淫靡压迫气质, 粘液蠕动音效, 动画化非人声表演",
+      "voice_ref_url": "/media/audio/ref_fee00ab8da1b56fa45f19d4a2328fc8c6bcce173.mp3",
+      "voice_ref_text": "嗯…终于…醒了吗？我的小猎物…你的心跳——砰砰砰…好快呢…被我的毒素包裹着…呼吸会变得困难对吧？来…放松…越是挣扎——就会陷得越深哦…你身体抖得好可爱呢…啊…我的触手在一点点…磨蹭你的皮肤…你会喜欢的…因为我很快就能…让你忘记一切…来吧——到我这儿来…这里…好温暖…你逃不掉的…永远留下来…当我的——就是这种感觉…对…好孩子…"
+    }
+  }
+}

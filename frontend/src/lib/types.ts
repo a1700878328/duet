@@ -18,8 +18,26 @@ export interface RoomMember {
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[];
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[];
   stats?: CharStats | null;
+}
+
+export interface AvatarVariant {
+  url: string;
+  label?: string | null;
+  source?: string | null;
+  created_at?: string | null;
+}
+
+export interface VoiceVariant {
+  url: string;
+  voice_id?: string | null;
+  text?: string | null;
+  label?: string | null;
+  source?: string | null;
+  created_at?: string | null;
 }
 
 export interface TaskRewards {
@@ -113,7 +131,9 @@ export interface MemberCard {
   voice_id: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[];
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[];
   stats?: CharStats | null;
 }
 
@@ -126,9 +146,11 @@ export interface NpcCard {
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[];
   created_by_ai: boolean;
   active: boolean;
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[];
   scene?: string | null;
   discovered?: string | null;
 }
@@ -144,7 +166,11 @@ export interface CharDraft {
   persona: string;
   appearance?: string | null;
   voice_id?: string | null;
+  voice_ref_url?: string | null;
+  voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[];
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[];
 }
 
 export interface UserCharacterCard {
@@ -155,7 +181,9 @@ export interface UserCharacterCard {
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
+  voice_variants?: VoiceVariant[];
   avatar_url?: string | null;
+  avatar_variants?: AvatarVariant[];
   source_world_card?: string | null;
   created_at: string;
   updated_at: string;
@@ -321,6 +349,15 @@ export interface SceneLogResponse {
   logs: Record<string, SceneLogEntry[]>;
 }
 
+export interface SceneDesignOut {
+  scene_name: string;
+  scene_type: string;
+  atmosphere: string;
+  potential_npcs: { name: string; persona: string; appearance: string }[];
+  scene_intro: string;
+  unlocked: boolean;
+}
+
 export type WsServerEvent =
   | WsHistory
   | WsMessage
@@ -346,10 +383,11 @@ export type WsClientEvent =
   | { type: "timeskip" }
   | { type: "goto_scene"; scene: string }
   | { type: "describe_scene" }
-  | { type: "god_whisper"; content: string }
+  | { type: "god_whisper"; content: string; target_npc?: string; scene?: string; action?: string }
   | { type: "pay_npc"; npc_id: number; amount: number }
-  | { type: "image" }
-  | { type: "typing"; is_typing: boolean };
+  | { type: "image"; custom_prompt?: string; characters?: string[]; designed_appearance?: string }
+  | { type: "typing"; is_typing: boolean }
+  | { type: "move"; scene: string; npcs: string[] };
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
 

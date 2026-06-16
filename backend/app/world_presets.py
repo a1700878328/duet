@@ -227,8 +227,9 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "说话粗鄙下流，满脑子都是性交和羞辱。"
         ),
         "appearance": (
-            "small green-skinned goblin, ugly face, yellow eyes, ragged loincloth, "
-            "worn leather armor, crude weapons, forest ambush"
+            "1boy, adult male goblin rogue, green skin, sharp ears, yellow eyes, "
+            "sly grin, wiry build, worn leather armor, crude dagger, forest ambush, "
+            "anime fantasy villain"
         ),
         "voice_id": "尖细猥琐的男性嗓音，像喉咙被掐住，语速快，带着窃笑",
     },
@@ -244,7 +245,11 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "goblin shaman, crude staff, bone necklace, glowing red eyes, "
             "tattered robe covered in strange symbols, dark cave lair"
         ),
-        "voice_id": "沙哑低沉、故意拖长的男性嗓音，带着玩味和轻蔑",
+        "voice_id": (
+            "年轻女性／小恶魔法师感，清亮偏低的女声，尾音轻快又危险；"
+            "语速慢条斯理，带狡黠笑意和施法般的停顿；"
+            "情绪气质是甜美、阴险、支配欲强。"
+        ),
     },
     {
         "scene": "森林",
@@ -255,8 +260,9 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "在兽人村里沦为公共性奴。兽人重视力量，但也享受彻底摧毁对手尊严的过程。"
         ),
         "appearance": (
-            "hulking orc warrior, green-gray skin, massive muscles, tusks protruding "
-            "from lower jaw, fur and bone armor, war axe, forest clearing"
+            "1boy, adult male orc warrior, green-gray skin, strong athletic build, "
+            "clean tusks, dark swept-back hair, fur-lined leather armor, war axe, "
+            "forest clearing, visual novel fantasy rival"
         ),
         "voice_id": "粗重洪亮的男性嗓音，像喉咙里有砂砾，带着野蛮的傲慢",
     },
@@ -293,11 +299,34 @@ KSIM_NPCS: list[dict[str, Any]] = [
     },
 ]
 PRESETS: dict[str, list[dict[str, Any]]] = {"ksim": KSIM_NPCS}
+HIDDEN_INITIAL_NPC_NAMES: dict[str, set[str]] = {
+    # Alternate/future forms should be introduced by story state, not shown as
+    # a second always-on role card next to the base character.
+    "ksim": {"魅魔化的会长"},
+}
+ALTERNATE_FORM_BASE_NAMES: dict[str, dict[str, str]] = {
+    "ksim": {"魅魔化的会长": "公会会长"},
+}
 
 
 def preset_npcs(world_card: str | None) -> list[dict[str, Any]]:
     """该世界卡的常驻主要 NPC 预设（建房时种入）；无预设返回空。"""
-    return PRESETS.get(world_card or "", [])
+    hidden = HIDDEN_INITIAL_NPC_NAMES.get(world_card or "", set())
+    return [p for p in PRESETS.get(world_card or "", []) if p.get("name") not in hidden]
+
+
+def hidden_initial_npc_names(world_card: str | None) -> set[str]:
+    """Preset NPC names that should not appear as initial/always-on cards."""
+    return set(HIDDEN_INITIAL_NPC_NAMES.get(world_card or "", set()))
+
+
+def alternate_form_base_name(
+    world_card: str | None, form_name: str | None
+) -> str | None:
+    """Return the base NPC name for a story-introduced alternate form."""
+    if not form_name:
+        return None
+    return ALTERNATE_FORM_BASE_NAMES.get(world_card or "", {}).get(form_name)
 
 
 def start_scene(world_card: str | None) -> str:

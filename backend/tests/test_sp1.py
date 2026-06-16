@@ -7,10 +7,12 @@ import asyncio
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app import ws as ws_mod
-from app.db import Base, engine
+from app.db import Base, SessionFactory, engine
 from app.main import app
+from app.models import NpcCard
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +117,67 @@ async def test_room_create_join(client: AsyncClient):
     assert forbidden.status_code == 403
 
 
+async def test_old_ksim_room_backfills_missing_preset_characters(client: AsyncClient):
+    token = await _register(client, "alice")
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = (
+        await client.post(
+            "/api/rooms",
+            json={
+                "name": "old ksim room",
+                "character_name": "Erin",
+                "world_card": "ksim",
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+
+    async with SessionFactory() as session:
+        npcs = (
+            await session.scalars(
+                select(NpcCard)
+                .where(NpcCard.room_id == rid)
+                .order_by(NpcCard.id)
+            )
+        ).all()
+        assert len(npcs) == 14
+        for npc in npcs[3:]:
+            await session.delete(npc)
+        session.add(
+            NpcCard(
+                room_id=rid,
+                name="魅魔化的会长",
+                persona="未来形态，不应作为开局常驻角色显示",
+                active=True,
+                created_by_ai=True,
+            )
+        )
+        await session.commit()
+
+    preset = await client.get(f"/api/rooms/{rid}/preset-characters", headers=headers)
+    assert preset.status_code == 200, preset.text
+    assert len(preset.json()) == 14
+    assert {n["name"] for n in preset.json()} >= {"公会会长"}
+    assert "魅魔化的会长" not in {n["name"] for n in preset.json()}
+
+    cards = await client.get(f"/api/rooms/{rid}/cards", headers=headers)
+    assert cards.status_code == 200, cards.text
+    names = [n["name"] for n in cards.json()["npcs"]]
+    assert len(names) == 15  # 14 visible presets + the private God card
+    assert "上帝" in names
+    assert "魅魔化的会长" not in names
+
+    async with SessionFactory() as session:
+        hidden = await session.scalar(
+            select(NpcCard).where(
+                NpcCard.room_id == rid,
+                NpcCard.name == "魅魔化的会长",
+            )
+        )
+        assert hidden is not None
+        assert hidden.active is False
+
+
 async def test_message_seq_monotonic(client: AsyncClient):
     a = await _register(client, "alice")
     ha = {"Authorization": f"Bearer {a}"}
@@ -146,6 +209,145 @@ async def test_message_seq_monotonic(client: AsyncClient):
         await client.get(f"/api/rooms/{rid}/messages?after_seq=3", headers=ha)
     ).json()
     assert [m["seq"] for m in tail] == [4, 5]
+
+
+async def test_resolve_advance_npc_rejects_god_and_inactive(client: AsyncClient):
+    token = await _register(client, "alice")
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = (
+        await client.post(
+            "/api/rooms",
+            json={
+                "name": "advance guard",
+                "character_name": "Erin",
+                "world_card": "ksim",
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+
+    async with SessionFactory() as session:
+        npc = await session.scalar(
+            select(NpcCard).where(
+                NpcCard.room_id == rid,
+                NpcCard.name == "公会会长",
+            )
+        )
+        assert npc is not None
+        npc_id = npc.id
+
+    assert await ws_mod._resolve_advance_npc(rid, 0) is None
+    assert await ws_mod._resolve_advance_npc(rid, "not-a-number") is None
+    assert await ws_mod._resolve_advance_npc(rid, npc_id) is not None
+
+    async with SessionFactory() as session:
+        npc = await session.get(NpcCard, npc_id)
+        assert npc is not None
+        npc.active = False
+        await session.commit()
+
+    assert await ws_mod._resolve_advance_npc(rid, npc_id) is None
+
+
+async def test_run_ai_turn_persists_required_npc_label(
+    monkeypatch, client: AsyncClient
+):
+    class NpcBrain:
+        async def complete(self, _messages):
+            return "[公会会长]: （抬起眼）现在轮到我说了。"
+
+    monkeypatch.setattr(ws_mod, "brain", NpcBrain())
+    token = await _register(client, "alice")
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = (
+        await client.post(
+            "/api/rooms",
+            json={
+                "name": "npc turn",
+                "character_name": "Erin",
+                "world_card": "ksim",
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+
+    async with SessionFactory() as session:
+        npc = await session.scalar(
+            select(NpcCard).where(
+                NpcCard.room_id == rid,
+                NpcCard.name == "公会会长",
+            )
+        )
+        assert npc is not None
+
+    coord = ws_mod.RoomCoordinator(room_id=rid)
+    await ws_mod._run_ai_turn(coord, npc)
+
+    async with SessionFactory() as session:
+        msg = (
+            await session.scalars(
+                select(ws_mod.Message)
+                .where(ws_mod.Message.room_id == rid)
+                .order_by(ws_mod.Message.seq.desc())
+            )
+        ).first()
+        assert msg is not None
+        assert msg.speaker_label == "公会会长"
+        assert "现在轮到我说了" in msg.content
+
+
+async def test_alternate_form_updates_existing_npc_instead_of_duplication(
+    client: AsyncClient,
+):
+    token = await _register(client, "alice")
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = (
+        await client.post(
+            "/api/rooms",
+            json={
+                "name": "form update",
+                "character_name": "Erin",
+                "world_card": "ksim",
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+
+    async with SessionFactory() as session:
+        base = await session.scalar(
+            select(NpcCard).where(
+                NpcCard.room_id == rid,
+                NpcCard.name == "公会会长",
+            )
+        )
+        assert base is not None
+        base_id = base.id
+
+        updated = await ws_mod._upsert_introduced_npc(
+            session,
+            room_id=rid,
+            world_card="ksim",
+            draft={
+                "name": "魅魔化的会长",
+                "persona": "剧情后变化的会长形态",
+                "appearance": "succubus guild master",
+            },
+            scene="魔王城",
+        )
+        await session.commit()
+
+        assert updated.id == base_id
+        cards = (
+            await session.scalars(
+                select(NpcCard).where(
+                    NpcCard.room_id == rid,
+                    NpcCard.name.in_(["公会会长", "魅魔化的会长"]),
+                )
+            )
+        ).all()
+        assert len(cards) == 1
+        assert cards[0].id == base_id
+        assert cards[0].name == "魅魔化的会长"
 
 
 async def test_ai_busy_guard(monkeypatch):

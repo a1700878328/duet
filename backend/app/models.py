@@ -79,11 +79,17 @@ class RoomMember(Base):
     voice_ref_text: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
+    voice_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     # 游戏层属性表（JSON 字符串：等级/经验/淫乱/各开发/状态/好感度…）。None=用默认表。
     stats: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
     avatar_url: Mapped[str | None] = mapped_column(
         String(256), nullable=True, default=None
+    )
+    avatar_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     joined_at: Mapped[datetime] = mapped_column(default=_now)
 
@@ -113,8 +119,14 @@ class UserCharacterCard(Base):
     voice_ref_text: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
+    voice_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     avatar_url: Mapped[str | None] = mapped_column(
         String(256), nullable=True, default=None
+    )
+    avatar_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     source_world_card: Mapped[str | None] = mapped_column(
         String(32), nullable=True, default=None
@@ -166,9 +178,15 @@ class NpcCard(Base):
     voice_ref_text: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
+    voice_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
     avatar_url: Mapped[str | None] = mapped_column(
         String(256), nullable=True, default=None
+    )
+    avatar_variants: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     # active=False 表示该 NPC 已被关闭/退出实时模拟（director 据此过滤）。
     active: Mapped[bool] = mapped_column(default=True)
