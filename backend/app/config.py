@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     eleven_tts_model: str = "eleven_v3"
     eleven_output_format: str = "mp3_44100_128"
     eleven_design_loudness: float = 0.35
-    eleven_design_guidance_scale: float = 5.0
+    eleven_design_guidance_scale: float = 8.0
     eleven_clone_design_preview: bool = True
     anime_voice_style_bias: str = (
         "Original Japanese anime / visual novel character voice, seiyuu-inspired "

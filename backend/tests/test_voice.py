@@ -162,7 +162,7 @@ async def test_fish_tags_use_reference_context(monkeypatch, tmp_path) -> None:
 
     _url, _headers, _payload, content = FakeAsyncClient.posted[0]
     decoded = ormsgpack.unpackb(content)
-    assert decoded["text"].startswith("[happy][chuckling]")
+    assert decoded["text"].startswith("[teasing][soft laugh]")
     assert (
         len(decoded["references"][0]["text"])
         <= voice_mod.VOICE_REFERENCE_PAYLOAD_MAX_CHARS

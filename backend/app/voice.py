@@ -472,9 +472,9 @@ class VoiceClient:
                 tags.append(tag)
 
         if re.search(r"(哈|呵|嘻|嘿|笑|哎呀|呀|嘛|哦|呢|~|～)", ctx):
-            add("happy")
+            add("teasing")
         if re.search(r"(缺钱|利息|契约|账|债|逾期|偿还|客人|商人|骑士大人)", ctx):
-            add("chuckling")
+            add("soft laugh")
         if re.search(r"(小声|悄悄|秘密|靠近|耳边|别告诉|嘘)", ctx):
             add("whispering")
         if re.search(r"(害怕|紧张|糟糕|怎么办|不、不|没、没|危险)", line):
@@ -482,15 +482,15 @@ class VoiceClient:
         if re.search(r"(生气|够了|闭嘴|不许|混蛋|竟敢|骗我)", line):
             add("angry")
         if re.search(r"(叹|唉|疲惫|难过|哭|抱歉|对不起)", line):
-            add("sighing")
+            add("sigh")
         if re.search(r"(等等|快|太好了|真的|？！|!|！)", line):
             add("excited")
         if "…" in line or "..." in line:
-            add("soft tone")
+            add("soft voice")
         if re.search(r"(冷笑|嘲笑|轻笑|笑)", line):
             add("chuckling")
         if not tags and re.search(r"(可爱|少女|软萌|亲近|温柔|甜)", ctx):
-            add("happy")
+            add("bright")
         return tags
 
     def _decorate_text(self, text: str, reference_text: str | None = None) -> str:
