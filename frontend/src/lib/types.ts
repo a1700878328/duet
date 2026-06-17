@@ -383,7 +383,7 @@ export type WsClientEvent =
   | { type: "timeskip" }
   | { type: "goto_scene"; scene: string }
   | { type: "describe_scene" }
-  | { type: "god_whisper"; content: string; target_npc?: string; scene?: string; action?: string }
+  | { type: "god_whisper"; content: string; target_npcs?: string[]; scene?: string; action?: string }
   | { type: "pay_npc"; npc_id: number; amount: number }
   | { type: "image"; custom_prompt?: string; characters?: string[]; designed_appearance?: string }
   | { type: "typing"; is_typing: boolean }

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Set true only to allow live brain calls in test/CI.
     allow_live_brain: bool = False
 
+    # Path to the Anima NTRMix API prompt template on disk.
+    # Empty = uses built-in workflow; set to a .api-prompt.txt path to override.
+    anima_workflow_template_path: str = ""
+
     # Live media switches for local debugging.
     media_generation_enabled: bool = True
     voice_generation_enabled: bool = True
@@ -37,7 +41,7 @@ class Settings(BaseSettings):
     eleven_api_base: str = "https://api.elevenlabs.io"
     eleven_api_key: str = ""
     eleven_api_key_file: str = "~/Desktop/eleven.txt"
-    eleven_voice_design_model: str = "eleven_multilingual_ttv_v2"
+    eleven_voice_design_model: str = "eleven_ttv_v3"
     eleven_tts_model: str = "eleven_v3"
     eleven_output_format: str = "mp3_44100_128"
     eleven_design_loudness: float = 0.35

@@ -156,6 +156,8 @@ def test_npc_prompt_forbids_narrator_label():
     )()
     prompt = build_npc_system_prompt(room, [], npc, ["公会会长"])
 
-    assert "绝对禁止使用 [旁白]" in prompt
-    assert "[[旁白请求:" in prompt
-    assert "需要环境/动作旁白时用 [旁白]" not in prompt
+    assert "narration_request" in prompt
+    assert "只输出一行 JSON" in prompt
+    assert '"dialogue"' in prompt
+    assert '"state"' in prompt
+    assert "不要写自己的动作、神态、心理描写" in prompt

@@ -21,6 +21,7 @@ async def judge_world_beat(
     scene: str = "",
     known_scenes: list[str] | None = None,
     world_lore: str = "",
+    scene_context: str = "",
     brain: BrainProvider | None = None,
 ) -> dict[str, Any]:
     """返回世界事件计划；NPC 是否发言由 NPC 自己判定。
@@ -130,9 +131,10 @@ async def judge_world_beat(
     )
     state_block = f"\n玩家数值/状态：{player_state}" if player_state else ""
     scene_block = f"\n当前场景：{scene}（只引入合此地的 NPC）" if scene else ""
+    scene_ctx_block = f"\n当前场景状态：{scene_context}" if scene_context else ""
     lore_block = f"\n\n{world_lore}" if world_lore else ""
     user = (
-        f"世界：{world}\n真人玩家角色：{players}{scene_block}\n"
+        f"世界：{world}\n真人玩家角色：{players}{scene_block}{scene_ctx_block}\n"
         f"已知可前往场景：{known_scene_text}\n"
         f"在场 NPC：\n{roster}{state_block}\n\n"
         f"最近场面：\n{recent_scene or '（刚开场）'}{lore_block}\n\n"

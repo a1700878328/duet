@@ -26,7 +26,7 @@ ELEVEN_API_BASE = settings.eleven_api_base.rstrip("/")
 ELEVEN_API_KEY = settings.eleven_api_key.strip()
 ELEVEN_API_KEY_FILE = settings.eleven_api_key_file.strip()
 ELEVEN_DESIGN_MODEL = (
-    settings.eleven_voice_design_model.strip() or "eleven_multilingual_ttv_v2"
+    settings.eleven_voice_design_model.strip() or "eleven_ttv_v3"
 )
 ELEVEN_TTS_MODEL = settings.eleven_tts_model.strip() or "eleven_v3"
 ELEVEN_OUTPUT_FORMAT = settings.eleven_output_format.strip() or "mp3_44100_128"
@@ -153,9 +153,15 @@ def _ensure_preview_text(text: str) -> str:
     # ElevenLabs Voice Design API requires text >= 100 characters.
     if len(preview) < 100:
         core = preview[:80].rstrip("。.!！")
-        preview = f"{core}……{core}，我说的你都明白了吧。"
-        while len(preview) < 100:
-            preview = f"{preview} {core}，明白了吗？"
+        # Natural expansion instead of robotic while-loop repetition.
+        preview = f"{core}……{core}。以上就是我想说的话。"
+        if len(preview) < 100:
+            preview = f"{core}……{core}，{core}。这些就是我想说的全部了。"
+        if len(preview) < 100:
+            preview = (
+                f"{core}……{core}，{core}。{core}……"
+                f"以上就是我想对你说的所有话了，请你一定要认真听、好好记住哦。"
+            )
     return preview[:VOICE_PREVIEW_MAX_CHARS]
 
 
@@ -298,14 +304,12 @@ class VoiceClient:
         key = _eleven_key()
         if not key:
             return None
-        # 使用角色特色的参考台词（padded to >=100 chars for ElevenLabs）
-        preview_text = _ensure_preview_text(reference_text)
         # Deterministic seed per character description for consistent voice design.
         design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,
-            "text": preview_text,
+            "text": _ensure_preview_text(reference_text),
             "seed": design_seed,
             "loudness": _clamp(ELEVEN_DESIGN_LOUDNESS, -1.0, 1.0),
             "guidance_scale": _clamp(ELEVEN_DESIGN_GUIDANCE_SCALE, 0.0, 100.0),
@@ -345,12 +349,11 @@ class VoiceClient:
         if not key:
             return None
         headers = {"xi-api-key": key, "Content-Type": "application/json"}
-        preview_text = _ensure_preview_text(reference_text)
         design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,
-            "text": preview_text,
+            "text": _ensure_preview_text(reference_text),
             "seed": design_seed,
             "loudness": _clamp(ELEVEN_DESIGN_LOUDNESS, -1.0, 1.0),
             "guidance_scale": _clamp(ELEVEN_DESIGN_GUIDANCE_SCALE, 0.0, 100.0),

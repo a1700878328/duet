@@ -344,13 +344,13 @@ export function useRoomSocket({
   );
 
   const godWhisper = useCallback(
-    (params: { content?: string; target_npc?: string; scene?: string; action?: string }) => {
+    (params: { content?: string; target_npcs?: string[]; scene?: string; action?: string }) => {
       const msg: Record<string, unknown> = { type: "god_whisper" };
       if (params.content?.trim()) msg.content = params.content.trim();
-      if (params.target_npc) msg.target_npc = params.target_npc;
+      if (params.target_npcs && params.target_npcs.length > 0) msg.target_npcs = params.target_npcs;
       if (params.scene) msg.scene = params.scene;
       if (params.action?.trim()) msg.action = params.action.trim();
-      if (!msg.content && !msg.target_npc) return;
+      if (!msg.content && (!params.target_npcs || params.target_npcs.length === 0)) return;
       setAiBusy(true);
       send(msg as WsClientEvent);
     },

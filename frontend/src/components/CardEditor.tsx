@@ -73,12 +73,12 @@ export function CardEditor({
         />
       </div>
       <div className="field">
-        <label>外貌 appearance（可选）</label>
+        <label>外貌描述（中文，可选）</label>
         <textarea
           className="input card-textarea"
           value={draft.appearance}
           onChange={(e) => patch("appearance", e.target.value)}
-          placeholder="用于生成立绘 / 场景图的外貌描述"
+          placeholder="如：银白色长发扎成高马尾，深紫色眼眸，精灵尖耳，身穿蓝白骑士制服"
           rows={2}
         />
       </div>

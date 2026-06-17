@@ -68,6 +68,10 @@ class RoomMember(Base):
     appearance: Mapped[str | None] = mapped_column(
         String(512), nullable=True, default=None
     )
+    # 英文 Danbooru tag 版 appearance（画图 AI 翻译结果，场景图/立绘直接使用）。
+    appearance_tags: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     # 角色卡升级：性格/说话风格/背景（喂提示词），声音（per-玩家 TTS）。
     persona: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     voice_id: Mapped[str | None] = mapped_column(
@@ -169,6 +173,9 @@ class NpcCard(Base):
     appearance: Mapped[str | None] = mapped_column(
         String(512), nullable=True, default=None
     )
+    appearance_tags: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     voice_id: Mapped[str | None] = mapped_column(
         String(200), nullable=True, default=None
     )
@@ -181,16 +188,14 @@ class NpcCard(Base):
     voice_variants: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
-    # 立绘：本地生图产出的头像 URL（/media/...）。None=未生成。
     avatar_url: Mapped[str | None] = mapped_column(
         String(256), nullable=True, default=None
     )
     avatar_variants: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
-    # active=False 表示该 NPC 已被关闭/退出实时模拟（director 据此过滤）。
     active: Mapped[bool] = mapped_column(default=True)
-    # 所属场景标签（None=随队/无所不在，任何场景都在场）。
+    scene: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     scene: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     # 玩家逐渐了解到的信息：随剧情累积刷新（区别于作者设定的 persona）。
     discovered: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)

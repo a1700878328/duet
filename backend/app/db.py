@@ -35,6 +35,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     },
     "room_members": {
         "appearance": "VARCHAR(512)",
+        "appearance_tags": "TEXT",
         "persona": "TEXT",
         "voice_id": "VARCHAR(200)",
         "voice_ref_url": "VARCHAR(256)",
@@ -53,6 +54,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "source_world_card": "VARCHAR(32)",
     },
     "npc_cards": {
+        "appearance_tags": "TEXT",
         "voice_ref_url": "VARCHAR(256)",
         "voice_ref_text": "TEXT",
         "voice_variants": "TEXT",

@@ -63,6 +63,7 @@ class MemberOut(BaseModel):
     display_name: str
     character_name: str
     appearance: str | None = None
+    appearance_tags: str | None = None
     persona: str | None = None
     voice_id: str | None = None
     voice_ref_url: str | None = None
@@ -135,6 +136,7 @@ class UserCharacterCardOut(BaseModel):
     name: str
     persona: str
     appearance: str | None = None
+    appearance_tags: str | None = None
     voice_id: str | None = None
     voice_ref_url: str | None = None
     voice_ref_text: str | None = None
@@ -150,6 +152,7 @@ class NpcCardIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     persona: str = Field(default="", max_length=4000)
     appearance: str | None = Field(default=None, max_length=512)
+    appearance_tags: str | None = None
     voice_id: str | None = Field(default=None, max_length=200)
 
 
@@ -169,6 +172,7 @@ class NpcCardOut(BaseModel):
     name: str
     persona: str
     appearance: str | None = None
+    appearance_tags: str | None = None
     voice_id: str | None = None
     voice_ref_url: str | None = None
     voice_ref_text: str | None = None

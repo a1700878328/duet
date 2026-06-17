@@ -596,7 +596,7 @@ export function RoomPage() {
             }}
             title="重新打开房间选人，选择账号卡、主角、世界角色或 AI 原创角色"
           >
-            ✨ 选角
+            选角
           </button>
           <button
             className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
@@ -728,7 +728,7 @@ export function RoomPage() {
               disabled={imaging}
               title="生成场景图像"
             >
-              {imaging ? <><span className="spinner" />生成中</> : "📷 生成"}
+              {imaging ? <><span className="spinner" />生成中</> : "生成场景图"}
             </button>
           )}
           <button
@@ -904,7 +904,7 @@ export function RoomPage() {
             <input
               type="text"
               className="input"
-              placeholder="如：倒了一杯酒递给对方"
+              placeholder="如：银发紫瞳的盲眼圣女，跪坐在教堂长椅上"
               value={imageText}
               onChange={(e) => setImageText(e.target.value)}
               autoFocus

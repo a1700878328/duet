@@ -310,9 +310,10 @@ export const api = {
     }),
 
   // Evolve NPC: adjust appearance tags from current persona → new portrait.
-  evolveNpc: (roomId: string, npcId: number) =>
+  evolveNpc: (roomId: string, npcId: number, description?: string) =>
     request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/evolve`, {
       method: "POST",
+      body: description ? JSON.stringify({ persona_add: description }) : undefined,
     }),
 
   // Evolve player character: same as evolveNpc but for the logged-in member.

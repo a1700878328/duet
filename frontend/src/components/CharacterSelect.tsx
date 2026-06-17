@@ -512,7 +512,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                   AI 发散中…
                 </>
               ) : (
-                "🎲 AI 发散一批"
+                "🎲 AI 随机生成"
               )}
             </button>
             <button
@@ -524,7 +524,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               }}
               disabled={picking !== null}
             >
-              ✍️ 自己描述
+              ✍️ 按描述生成
             </button>
           </div>
         )}

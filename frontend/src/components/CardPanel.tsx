@@ -19,7 +19,7 @@ interface Props {
   onClose: () => void;
   // Make the given NPC react in the timeline (advance with npc_id).
   onNpcSpeak: (npcId: number) => void;
-  onGodWhisper?: (params: { target_npc: string; scene?: string; action: string }) => void;
+  onGodWhisper?: (params: { target_npcs: string[]; scene?: string; action: string }) => void;
   onError?: (msg: string) => void;
   // Disable speak actions while an AI turn is in flight.
   aiBusy?: boolean;
@@ -196,7 +196,7 @@ export function CardPanel({
   const [voiceSelectBusy, setVoiceSelectBusy] = useState<string | null>(null);
   const [myCardOverride, setMyCardOverride] = useState<MemberCard | null>(null);
   const [godModalOpen, setGodModalOpen] = useState(false);
-  const [godTargetNpc, setGodTargetNpc] = useState("");
+  const [godTargetNpcs, setGodTargetNpcs] = useState<string[]>([]);
   const [godAction, setGodAction] = useState("");
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewStopRef = useRef<number | null>(null);
@@ -243,13 +243,7 @@ export function CardPanel({
 
   useEffect(() => {
     setMyCardOverride(null);
-  }, [
-    roomId,
-    myUserId,
-    myCardFromCards?.character_name,
-    myCardFromCards?.persona,
-    myCardFromCards?.appearance,
-  ]);
+  }, [cards, roomId, myUserId]);
 
   function setBusy<T>(
     setter: React.Dispatch<React.SetStateAction<Set<T>>>,
@@ -531,9 +525,9 @@ export function CardPanel({
     }
   }
 
-  async function evolveNpc(npc: NpcCard) {
+  async function evolveNpc(npc: NpcCard, desc?: string) {
     try {
-      await api.evolveNpc(roomId, npc.id);
+      await api.evolveNpc(roomId, npc.id, desc);
       await refresh();
     } catch (err) {
       fail(err, "角色进化失败");
@@ -675,34 +669,22 @@ export function CardPanel({
                     {MEDIA_GENERATION_ENABLED && (
                       <button
                         className="btn btn-ghost btn-sm"
-                        onClick={genMyAvatar}
+                        onClick={() => {
+                          const desc = window.prompt("描述外貌变化（留空=AI 自由发挥）");
+                          if (desc?.trim()) {
+                            evolveMyCard(desc.trim());
+                          } else {
+                            genMyAvatar();
+                          }
+                        }}
                         disabled={myAvatarBusy}
-                        title="根据外貌描述生成头像（约 30–60 秒）"
+                        title="留空=AI基于人设重绘，输入描述=按描述重绘"
                       >
                         {myAvatarBusy ? (
-                          <>
-                            <span className="spinner spinner-dark" />
-                            生成头像中…
-                          </>
-                        ) : myCard.avatar_url ? (
-                          "🎨 重新生成头像"
+                          <><span className="spinner spinner-dark" />生成中…</>
                         ) : (
-                          "🎨 生成头像"
+                          "重绘"
                         )}
-                      </button>
-                    )}
-                    {(
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          const add = window.prompt(
-                            `追加角色人设：\n当前：${(myCard.persona || "").slice(0, 100)}…`
-                          );
-                          if (add?.trim()) evolveMyCard(add.trim());
-                        }}
-                        title="追加人设→AI调外貌→重生头像"
-                      >
-                        🌱 进化
                       </button>
                     )}
                     {VOICE_GENERATION_ENABLED && (
@@ -1005,32 +987,27 @@ export function CardPanel({
                         </button>
                       )}
                       {MEDIA_GENERATION_ENABLED && !isGod && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => genNpcAvatar(npc)}
-                          disabled={busyAvatar}
-                          title="根据外貌描述生成头像（约 30–60 秒）"
-                        >
-                          {busyAvatar ? (
-                            <>
-                              <span className="spinner spinner-dark" />
-                              头像生成中…
-                            </>
-                          ) : npc.avatar_url ? (
-                            "🎨 重生头像"
-                          ) : (
-                            "🎨 头像"
-                          )}
-                        </button>
-                      )}
-                      {!isGod && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => evolveNpc(npc)}
-                          title="根据当前人设自动调整外貌tag→重生头像"
-                        >
-                          🌱 进化
-                        </button>
+                        <>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              const desc = window.prompt("描述外貌变化（留空=AI 自由发挥）");
+                              if (desc?.trim()) {
+                                evolveNpc(npc, desc.trim());
+                              } else {
+                                genNpcAvatar(npc);
+                              }
+                            }}
+                            disabled={busyAvatar}
+                            title="留空=AI基于人设重绘，输入描述=按描述重绘"
+                          >
+                            {busyAvatar ? (
+                              <><span className="spinner spinner-dark" />生成中…</>
+                            ) : (
+                              "重绘"
+                            )}
+                          </button>
+                        </>
                       )}
                       {VOICE_GENERATION_ENABLED && !isGod && (
                         <button
@@ -1177,21 +1154,30 @@ export function CardPanel({
         <div className="overlay-backdrop" onClick={() => setGodModalOpen(false)}>
           <div className="move-modal" onClick={(e) => e.stopPropagation()}>
             <h3>👁 上帝私聊</h3>
-            <select
-              className="input"
-              value={godTargetNpc}
-              onChange={(e) => setGodTargetNpc(e.target.value)}
-            >
-              <option value="">— 选择目标 NPC —</option>
+            <label>选择目标 NPC（可多选）</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
               {currentSceneNpcs.map((n) => (
-                <option key={n.id} value={n.name}>{n.name}</option>
+                <label key={n.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={godTargetNpcs.includes(n.name)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setGodTargetNpcs([...godTargetNpcs, n.name]);
+                      } else {
+                        setGodTargetNpcs(godTargetNpcs.filter((t) => t !== n.name));
+                      }
+                    }}
+                  />
+                  {n.name}
+                </label>
               ))}
-            </select>
+            </div>
             <label style={{ marginTop: 12 }}>让角色做什么</label>
             <input
               type="text"
               className="input"
-              placeholder="如：干我、跟我走、命令他…"
+              placeholder="输入控制指令"
               value={godAction}
               onChange={(e) => setGodAction(e.target.value)}
               autoFocus
@@ -1199,14 +1185,14 @@ export function CardPanel({
             <div className="move-actions">
               <button
                 className="btn btn-primary btn-sm"
-                disabled={aiBusy || !godTargetNpc || !godAction.trim()}
+                disabled={aiBusy || godTargetNpcs.length === 0 || !godAction.trim()}
                 onClick={() => {
                   onGodWhisper?.({
-                    target_npc: godTargetNpc,
+                    target_npcs: godTargetNpcs,
                     action: godAction.trim(),
                   });
                   setGodModalOpen(false);
-                  setGodTargetNpc("");
+                  setGodTargetNpcs([]);
                   setGodAction("");
                 }}
               >

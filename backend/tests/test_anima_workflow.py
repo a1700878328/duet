@@ -3,18 +3,11 @@ from app.imagegen.portrait import build_portrait_prompt
 from app.imagegen.scene_prompt import build_scene_prompt_sync
 
 
-def test_anima_workflow_can_add_ipadapter_reference() -> None:
-    graph = build_anima_workflow(
-        "A high-quality anime portrait.",
-        reference_image="duet_ref.png",
-    )
+def test_anima_workflow_creates_valid_graph() -> None:
+    graph = build_anima_workflow("A high-quality anime portrait.")
 
-    assert graph["12"]["class_type"] == "LoadImage"
-    assert graph["12"]["inputs"]["image"] == "duet_ref.png"
-    assert graph["13"]["class_type"] == "CLIPVisionLoader"
-    assert graph["14"]["class_type"] == "IPAdapterModelLoader"
-    assert graph["15"]["class_type"] == "IPAdapterAdvanced"
-    assert graph["9"]["inputs"]["model"] == ["15", 0]
+    assert graph["1"]["class_type"] == "AnimaBoosterLoader"
+    assert graph["9"]["class_type"] == "KSampler"
 
 
 def test_anima_workflow_can_add_teacache_and_upscale() -> None:
@@ -107,19 +100,16 @@ def test_baobao_workflow_can_enable_original_ultratile_chain() -> None:
     assert "REFINED" in graph["169"]["inputs"]["filename_prefix"]
 
 
-def test_baobao_workflow_can_add_two_unmasked_ipadapter_references() -> None:
+def test_baobao_workflow_builds_ntrmix_graph() -> None:
     graph = build_baobao_anima_workflow(
         "Two characters stand together.",
         width=1216,
         height=832,
-        reference_images=["left.png", "right.png"],
         seed=123,
     )
 
     assert graph["3"]["inputs"]["lora_name"] == "ntrmix_style_anima_b1_v1.safetensors"
     assert graph["54"]["inputs"]["text"] == "Two characters stand together."
-    assert "200" not in graph
-    assert "201" not in graph
     assert all(
         n["class_type"] not in {"SolidMask", "MaskComposite"} for n in graph.values()
     )
@@ -138,79 +128,35 @@ def test_baobao_workflow_can_disable_ntrmix_for_clean_style() -> None:
     assert graph["57"]["inputs"]["model"] == ["60", 0]
 
 
-def test_portrait_prompt_requests_cute_character_expression() -> None:
+def test_portrait_prompt_passes_ai_output_through() -> None:
+    """AI controls the full creative prompt — only nsfw/negative are system-added."""
     positive, negative = build_portrait_prompt(
-        "silver hair, blue eyes, light armor",
+        "silver hair, blue eyes, light armor, closed mouth, looking at viewer",
         name="莉娜",
         persona="温柔但有点害羞的新人骑士",
     )
 
-    assert "1girl, solo, anime character portrait" in positive
-    assert "anime character portrait" in positive
-    assert "three-quarter view" in positive
-    assert "closed mouth" in positive
-    assert "looking at viewer" not in positive
-    assert "polished cel shading" in positive
     assert "silver hair, blue eyes, light armor" in positive
-    assert "温柔但有点害羞的新人骑士" in positive
-    assert "stern face" in negative
+    assert "nsfw" not in positive  # nsfw flag not set
     assert "passport photo" in negative
 
 
-def test_portrait_prompt_rotates_camera_and_mouth_variants() -> None:
+def test_portrait_prompt_adds_nsfw_prefix_when_enabled() -> None:
     positive, _negative = build_portrait_prompt(
         "silver hair, blue eyes, light armor",
         name="莉娜",
         persona="温柔但有点害羞的新人骑士",
-        prompt_variant=2,
+        nsfw=True,
     )
 
-    assert "profile" in positive
-    assert "looking to the side" in positive
-    assert "closed mouth" in positive
+    assert positive.startswith("nsfw, explicit")
+    assert "silver hair, blue eyes, light armor" in positive
 
 
-def test_portrait_prompt_uses_visual_novel_style_for_male_roles() -> None:
-    positive, negative = build_portrait_prompt(
-        "scarred combat instructor, short black hair, leather armor",
-        name="教官",
-        persona="严厉但有魅力的战斗导师",
-    )
-
-    assert "1boy, solo, anime character portrait" in positive
-    assert "handsome visual novel male lead" in positive
-    assert "handsome mentor" in positive
-    assert "shota" in negative
-    assert "horror" in negative
-
-
-def test_portrait_prompt_uses_stylish_male_monster_style() -> None:
-    positive, negative = build_portrait_prompt(
-        (
-            "1boy, adult male orc warrior, green-gray skin, strong athletic build, "
-            "clean tusks, fur-lined leather armor"
-        ),
-        name="兽人",
-        persona="高大的兽人战士，危险但有压迫感的强敌。",
-    )
-
-    assert "1boy, solo, adult monster man portrait" in positive
-    assert "attractive adult anime monster man" in positive
-    assert "handsome orc warrior" in positive
-    assert "ugly monster" in negative
-    assert "grotesque brute" in negative
-
-
-def test_portrait_prompt_does_not_apply_male_style_to_female_cards() -> None:
-    positive, negative = build_portrait_prompt(
-        "mature woman, guild master, braided silver hair",
-        name="公会会长",
-        persona="曾和教官交往，也了解人类男性的弱点。",
-    )
-
-    assert "1girl, solo, anime character portrait" in positive
-    assert "handsome visual novel male lead" not in positive
-    assert "shota" not in negative
+def test_portrait_prompt_empty_appearance_returns_empty() -> None:
+    positive, negative = build_portrait_prompt("")
+    assert positive == ""
+    assert "passport photo" in negative
 
 
 def test_scene_prompt_uses_location_background_not_blank_backdrop() -> None:

@@ -46,6 +46,7 @@ from typing import Any
 
 import httpx
 
+from ..config import settings
 from . import media
 from .client import ensure_comfyui
 from .config import COMFY_URL
@@ -74,8 +75,6 @@ ANIMA_NTRMIX_TRIGGER = "@ntrmixstyle"
 ANIMA_CLIP = "qwen_3_06b_base.safetensors"
 ANIMA_CLIP_TYPE = "stable_diffusion"
 ANIMA_VAE = "qwen_image_vae.safetensors"
-IPADAPTER_PLUS = "ip-adapter-plus_sdxl_vit-h.safetensors"
-IPADAPTER_CLIP_VISION = "clip_vision_h.safetensors"
 
 # === Sampler params (high quality — 30 steps CFG 4, no turbo by default) ===
 ANIMA_STEPS = 30
@@ -119,11 +118,13 @@ BAOBAO_QUALITY_CORE = (
     "flat anime coloring, crisp expressive eyes, official art"
 )
 BAOBAO_QUALITY_PREFIX = f"{ANIMA_NTRMIX_TRIGGER}, {BAOBAO_QUALITY_CORE}"
-ACTIVE_STRONG_WORKFLOWS = Path(
+_DEFAULT_TEMPLATE_DIR = Path(
     r"C:\Users\a1700\Documents\ComfyUI\user\default\workflows\Active_Strong"
 )
 ANIMA_NTRMIX_FACE_STYLE_API_PROMPT = (
-    ACTIVE_STRONG_WORKFLOWS
+    Path(settings.anima_workflow_template_path)
+    if settings.anima_workflow_template_path
+    else _DEFAULT_TEMPLATE_DIR
     / "FINAL_Anima_NTRMix_FaceStyle_Single_UltraTile1824.api-prompt.txt"
 )
 
@@ -137,14 +138,12 @@ def _remove_ntrmix_trigger(text: str) -> str:
 
 
 def _with_anima_style_prefix(positive: str, *, use_ntrmix: bool = True) -> str:
-    """Ensure generated prompts carry the active Anima style trigger."""
+    """Ensure LoRA trigger + quality prefix; pass through if AI already has them."""
     text = positive.strip()
     if not use_ntrmix:
-        text = _remove_ntrmix_trigger(text)
+        return _remove_ntrmix_trigger(text)
     if "score_9" in text or "best quality" in text:
         if ANIMA_NTRMIX_TRIGGER in text:
-            return text
-        if not use_ntrmix:
             return text
         return f"{ANIMA_NTRMIX_TRIGGER}, {text}"
     prefix = BAOBAO_QUALITY_PREFIX if use_ntrmix else BAOBAO_QUALITY_CORE
@@ -235,8 +234,6 @@ def build_anima_workflow(
     use_turbo: bool = False,
     use_ntrmix: bool = True,
     ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
-    reference_image: str | None = None,
-    ipadapter_weight: float = 0.42,
     use_teacache: bool = True,
     second_pass: bool = True,
     upscale: bool = False,
@@ -357,35 +354,6 @@ def build_anima_workflow(
         model_ref = ["23", 0]
 
     sampler_model_ref = model_ref
-    if reference_image:
-        g["12"] = {
-            "class_type": "LoadImage",
-            "inputs": {"image": reference_image},
-        }
-        g["13"] = {
-            "class_type": "CLIPVisionLoader",
-            "inputs": {"clip_name": IPADAPTER_CLIP_VISION},
-        }
-        g["14"] = {
-            "class_type": "IPAdapterModelLoader",
-            "inputs": {"ipadapter_file": IPADAPTER_PLUS},
-        }
-        g["15"] = {
-            "class_type": "IPAdapterAdvanced",
-            "inputs": {
-                "model": model_ref,
-                "ipadapter": ["14", 0],
-                "image": ["12", 0],
-                "clip_vision": ["13", 0],
-                "weight": max(0.0, min(float(ipadapter_weight), 1.2)),
-                "weight_type": "style and composition",
-                "combine_embeds": "concat",
-                "start_at": 0.08,
-                "end_at": 0.72,
-                "embeds_scaling": "V only",
-            },
-        }
-        sampler_model_ref = ["15", 0]
 
     g["9"] = {
         "class_type": "KSampler",
@@ -461,8 +429,6 @@ def build_baobao_anima_workflow(
     width: int = PORTRAIT_WIDTH,
     height: int = PORTRAIT_HEIGHT,
     seed: int | None = None,
-    reference_images: list[str] | None = None,
-    ipadapter_weight: float = 0.52,
     use_ntrmix: bool = True,
     ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
     use_turbo: bool = False,
@@ -500,7 +466,6 @@ def build_baobao_anima_workflow(
         positive = _remove_ntrmix_trigger(positive)
     neg = DEFAULT_NEGATIVE if not negative else f"{DEFAULT_NEGATIVE}, {negative}"
 
-    refs = [r for r in (reference_images or []) if r][:2]
     g: Graph = {
         "55": {
             "class_type": "AnimaBoosterLoader",
@@ -623,40 +588,7 @@ def build_baobao_anima_workflow(
         g["4"]["inputs"]["model"] = ["3", 0]
     if not use_ntrmix:
         g.pop("4", None)
-    if refs:
-        g["200"] = {
-            "class_type": "CLIPVisionLoader",
-            "inputs": {"clip_name": IPADAPTER_CLIP_VISION},
-        }
-        g["201"] = {
-            "class_type": "IPAdapterModelLoader",
-            "inputs": {"ipadapter_file": IPADAPTER_PLUS},
-        }
-        model_ref = base_model_ref
-        for idx, image_name in enumerate(refs):
-            load_id = str(202 + idx * 2)
-            ipa_id = str(203 + idx * 2)
-            g[load_id] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
-            g[ipa_id] = {
-                "class_type": "IPAdapterAdvanced",
-                "inputs": {
-                    "model": model_ref,
-                    "ipadapter": ["201", 0],
-                    "image": [load_id, 0],
-                    "clip_vision": ["200", 0],
-                    "weight": max(0.0, min(float(ipadapter_weight), 1.2)),
-                    "weight_type": "style and composition",
-                    "combine_embeds": "concat",
-                    "start_at": 0.03,
-                    "end_at": 0.78,
-                    "embeds_scaling": "V only",
-                },
-            }
-            model_ref = [ipa_id, 0]
-        g["57"]["inputs"]["model"] = model_ref
-        model_ref_for_refine = model_ref
-    else:
-        model_ref_for_refine = base_model_ref
+    model_ref_for_refine = base_model_ref
 
     if upscale:
         g["164"] = {
@@ -874,31 +806,6 @@ async def _submit_and_fetch(
         return {"error": "超时", "prompt_id": prompt_id}
 
 
-async def _upload_input_image(path: str) -> str | None:
-    """Upload a local reference image to ComfyUI's input folder.
-
-    LoadImage nodes can only read ComfyUI input files. Avatar images generated by
-    this app live under app/media/generated, so we copy them through the HTTP
-    upload endpoint and use the returned input filename in the workflow.
-    """
-    src = Path(path)
-    if not src.exists() or not src.is_file():
-        return None
-    name = f"duet_ref_{hashlib.sha1(str(src).encode()).hexdigest()[:12]}_{src.name}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        try:
-            with src.open("rb") as f:
-                resp = await client.post(
-                    f"{COMFY_URL}/upload/image",
-                    data={"type": "input", "overwrite": "true"},
-                    files={"image": (name, f, "image/png")},
-                )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception:
-            return None
-    return data.get("name") or name
-
 
 async def generate_anima(
     positive: str,
@@ -911,9 +818,6 @@ async def generate_anima(
     use_turbo: bool = False,
     use_ntrmix: bool = True,
     ntrmix_strength: float = ANIMA_NTRMIX_STRENGTH,
-    reference_image_path: str | None = None,
-    reference_image_paths: list[str] | None = None,
-    ipadapter_weight: float = 0.42,
     upscale: bool = False,
     tile_refine: bool = True,
 ) -> dict[str, Any]:
@@ -929,18 +833,6 @@ async def generate_anima(
     if landscape and width == PORTRAIT_WIDTH and height == PORTRAIT_HEIGHT:
         width, height = LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT
 
-    uploaded_refs: list[str] = []
-    ref_paths = list(reference_image_paths or [])
-    if reference_image_path:
-        ref_paths.insert(0, reference_image_path)
-    for ref_path in ref_paths[:2]:
-        try:
-            uploaded = await _upload_input_image(ref_path)
-        except Exception:
-            uploaded = None
-        if uploaded:
-            uploaded_refs.append(uploaded)
-
     try:
         workflow = build_baobao_anima_workflow(
             positive,
@@ -948,8 +840,6 @@ async def generate_anima(
             width=width,
             height=height,
             seed=seed,
-            reference_images=uploaded_refs,
-            ipadapter_weight=ipadapter_weight,
             use_ntrmix=use_ntrmix,
             ntrmix_strength=ntrmix_strength,
             use_turbo=use_turbo,

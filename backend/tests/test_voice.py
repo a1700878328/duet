@@ -237,9 +237,10 @@ async def test_eleven_design_saves_preview_when_clone_unavailable(monkeypatch) -
     assert designed.voice_id == "eleven:saved_123"
     assert designed.reference_audio == b"reference-mp3"
     design_payload = FakeElevenClient.posts[0][3]
-    assert design_payload["model_id"] == "eleven_multilingual_ttv_v2"
-    assert "text" in design_payload
-    assert len(design_payload["text"]) >= 100
+    assert design_payload["model_id"] == "eleven_ttv_v3"
+    assert isinstance(design_payload.get("text"), str)
+    assert len(design_payload["text"]) >= 100  # ElevenLabs requires >=100 chars
+    assert "auto_generate_text" not in design_payload
 
 
 @pytest.mark.asyncio
