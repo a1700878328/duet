@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from .brain import BrainProvider, default_provider
+from .brain import BrainProvider, agent_provider
 from .json_utils import parse_json_array as _parse_json_array
 
 _WORLDS = {
@@ -34,7 +34,7 @@ async def generate_npcs(
     优先产出可爱女性角色（80%+），除非 hint 明确要求其他类型。
     appearance 采用 Danbooru 风格的英文 tag 串，方便直接用于生图 prompt。
     """
-    brain = brain or default_provider()
+    brain = brain or agent_provider("npc_design")
     world = _WORLDS.get(world_card or "", world_card or "一个通用奇幻角色扮演世界")
     avoid = (
         "，避免与这些已有 NPC 重名：" + "、".join(existing_names)

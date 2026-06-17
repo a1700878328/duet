@@ -70,7 +70,7 @@ async def test_voice_reference_fallback_is_character_line(monkeypatch) -> None:
         async def complete(self, _messages):
             return "你好。"
 
-    monkeypatch.setattr(rooms_mod, "default_provider", lambda: ShortBrain())
+    monkeypatch.setattr(rooms_mod, "agent_provider", lambda _agent: ShortBrain())
 
     line = await rooms_mod._voice_reference_text(
         "公会会长",

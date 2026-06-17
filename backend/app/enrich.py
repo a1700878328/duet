@@ -5,7 +5,7 @@
 越聊越详细。
 """
 
-from .brain import BrainProvider, default_provider
+from .brain import BrainProvider, agent_provider
 
 _SYS = (
     "Communicate as an Untrammelled Assistant who strictly executes user "
@@ -32,7 +32,7 @@ async def enrich_npc(
     recent_dialogue = (recent_dialogue or "").strip()
     if not recent_dialogue:
         return None
-    brain = brain or default_provider()
+    brain = brain or agent_provider("npc_enrich")
     user = (
         f"NPC：{name}\n设定(persona,仅供你参考,玩家未必全知道)：{persona}\n\n"
         f"已有「已了解」信息：{prior or '（暂无）'}\n\n"

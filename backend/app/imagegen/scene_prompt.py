@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..brain import BrainProvider, default_provider
+from ..brain import BrainProvider, agent_provider
 from ..json_utils import parse_json_object
 
 # ---------------------------------------------------------------------------
@@ -339,9 +339,7 @@ async def build_scene_prompt(
     or failure, falls back to the deterministic tag assembler so image
     generation never blocks on AI issues.
     """
-    brain = brain or default_provider()
-    brain.temperature = 0.35
-    brain.max_tokens = 800
+    brain = brain or agent_provider("scene_prompt")
 
     user = _scene_prompt_user(
         scene_text, appearances,

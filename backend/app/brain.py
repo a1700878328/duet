@@ -24,6 +24,7 @@ class BrainProvider:
     api_key: str
     base_url: str
     model: str
+    agent_name: str = "default"
     # Extra body kwargs merged into every request (e.g. chat_template_kwargs).
     extra_body: dict[str, Any] = field(default_factory=dict)
     temperature: float = 0.9
@@ -113,10 +114,57 @@ def _parse_sse_content(line: str) -> str | None:
     return content or None
 
 
-def default_provider() -> BrainProvider:
+@dataclass(frozen=True, slots=True)
+class AgentProfile:
+    """Per-agent runtime knobs. Model stays shared unless settings changes it."""
+
+    temperature: float
+    max_tokens: int
+    timeout: float = 120.0
+    extra_body: dict[str, Any] = field(default_factory=dict)
+
+
+AGENT_PROFILES: dict[str, AgentProfile] = {
+    "default": AgentProfile(temperature=0.9, max_tokens=800),
+    # Stable JSON planners/judges.
+    "director": AgentProfile(temperature=0.25, max_tokens=900),
+    "npc_impulse": AgentProfile(temperature=0.2, max_tokens=320),
+    "stats_judge": AgentProfile(temperature=0.15, max_tokens=500),
+    "npc_move_consent": AgentProfile(temperature=0.2, max_tokens=500),
+    # Expressive writing.
+    "npc_dialogue": AgentProfile(temperature=0.9, max_tokens=800),
+    "ending": AgentProfile(temperature=0.75, max_tokens=800),
+    # Design / prompt work.
+    "character_design": AgentProfile(temperature=0.65, max_tokens=1200),
+    "npc_design": AgentProfile(temperature=0.65, max_tokens=1000),
+    "image_prompt": AgentProfile(temperature=0.5, max_tokens=1000),
+    "image_prompt_translate": AgentProfile(temperature=0.35, max_tokens=600),
+    "scene_prompt": AgentProfile(temperature=0.35, max_tokens=800),
+    # Background maintenance.
+    "npc_enrich": AgentProfile(temperature=0.25, max_tokens=700),
+    "card_rewrite": AgentProfile(temperature=0.5, max_tokens=800),
+}
+
+
+def agent_provider(agent_name: str) -> BrainProvider:
+    """Return a fresh DeepSeek provider instance for one logical AI role.
+
+    All roles use the same configured model (currently deepseek-v4-flash) so cost
+    stays predictable; the separation is for temperature/token isolation and
+    clearer call-site intent.
+    """
+    profile = AGENT_PROFILES.get(agent_name, AGENT_PROFILES["default"])
     return BrainProvider(
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
-        max_tokens=800,
+        agent_name=agent_name,
+        max_tokens=profile.max_tokens,
+        temperature=profile.temperature,
+        timeout=profile.timeout,
+        extra_body=dict(profile.extra_body),
     )
+
+
+def default_provider() -> BrainProvider:
+    return agent_provider("default")

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from .brain import BrainProvider, default_provider
+from .brain import BrainProvider, agent_provider
 from .json_utils import parse_json_object as _parse_obj
 from .models import NpcCard, RoomMember
 
@@ -31,7 +31,7 @@ async def judge_world_beat(
     time_jump = 只有显式快进/允许跳时才保留的时间推进描述，否则 None。
     time_advance_steps/scene_change = 对话明确触发的自然时间/场景变化。
     """
-    brain = brain or default_provider()
+    brain = brain or agent_provider("director")
     roster = "\n".join(f"  id={n.id} 「{n.name}」：{n.persona}" for n in npcs)
     players = "、".join(m.character_name for m in members) or "（无）"
     world = (

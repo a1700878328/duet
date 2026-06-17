@@ -14,7 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .brain import default_provider
+from .brain import agent_provider
 from .char_gen import generate_character_options
 from .config import settings
 from .crud import ensure_room_scene, is_member, messages_after, room_to_out
@@ -842,7 +842,7 @@ def _audio_media_path(url: str | None) -> Path | None:
 async def _voice_design_for_card(
     *, name: str, persona: str | None, appearance: str | None
 ) -> str:
-    brain = default_provider()
+    brain = agent_provider("card_rewrite")
     prompt = (
         "你是角色配音导演。根据角色卡生成一句 ElevenLabs Voice Design 描述，"
         "只输出一句话，不要解释。整体风格必须像原创日本动画/视觉小说里的声优配音："
@@ -859,11 +859,6 @@ async def _voice_design_for_card(
         f"人设：{persona or '（无）'}\n"
         f"外貌：{appearance or '（无）'}"
     )
-    try:
-        brain.temperature = 0.4
-        brain.max_tokens = max(getattr(brain, "max_tokens", 800), 800)
-    except Exception:
-        pass
     raw = await brain.complete(
         [
             {"role": "system", "content": "只输出声音设计描述。"},
@@ -960,7 +955,7 @@ async def _voice_reference_text(
     name: str, persona: str | None, appearance: str | None
 ) -> str:
     """Generate a character-specific audition line for voice design/cloning."""
-    brain = default_provider()
+    brain = agent_provider("character_design")
     prompt = (
         "为这个角色写一段用于语音设计试听的中文台词。要求："
         "第一人称，像角色本人开口；必须体现职业/身份、性格、说话风格和与玩家的关系；"
@@ -977,8 +972,6 @@ async def _voice_reference_text(
         f"外貌：{appearance or '（无）'}"
     )
     try:
-        brain.temperature = 0.65
-        brain.max_tokens = max(getattr(brain, "max_tokens", 800), 900)
         raw = await brain.complete(
             [
                 {"role": "system", "content": "只输出角色试听台词。"},
@@ -1179,12 +1172,7 @@ async def _evolve_member_card_fields(
     old_appearance: str,
     persona_add: str,
 ) -> tuple[str, str]:
-    brain = default_provider()
-    try:
-        brain.temperature = 0.45
-        brain.max_tokens = max(getattr(brain, "max_tokens", 800), 1200)
-    except Exception:
-        pass
+    brain = agent_provider("character_design")
     prompt = (
         "玩家为自己的角色卡追加了一段新人设。请把旧人设和追加人设融合成一版"
         "更完整、可直接用于角色扮演的新角色卡，同时用中文自然语言更新"
@@ -1531,9 +1519,7 @@ async def design_scene(
         for m in history[-16:]
         if m.author_type in {"user", "ai"}
     ) or "（暂无对话）"
-    brain = default_provider()
-    brain.temperature = 0.5
-    brain.max_tokens = 800
+    brain = agent_provider("director")
     try:
         raw = await brain.complete(
             [
@@ -1710,9 +1696,7 @@ async def generate_my_avatar(
     _nsfw_avatar = _room_avatar is not None and _room_avatar.world_card == "ksim"
     variant_count = len(member.avatar_variants) if member.avatar_variants else 0
     old_appearance = member.appearance or ""
-    brain = default_provider()
-    brain.temperature = 0.5
-    brain.max_tokens = 400
+    brain = agent_provider("card_rewrite")
     try:
         raw = await brain.complete(
             [
@@ -1831,9 +1815,7 @@ async def generate_npc_avatar(
     _nsfw_npca = _room_npca is not None and _room_npca.world_card == "ksim"
     variant_count = len(npc.avatar_variants) if npc.avatar_variants else 0
     old_appearance = npc.appearance or ""
-    brain = default_provider()
-    brain.temperature = 0.5
-    brain.max_tokens = 400
+    brain = agent_provider("card_rewrite")
     try:
         raw = await brain.complete(
             [
@@ -1930,9 +1912,7 @@ async def evolve_npc(
     nsfw = room is not None and room.world_card == "ksim"
     current_persona = npc.persona or ""
     old_appearance = npc.appearance or ""
-    brain = default_provider()
-    brain.temperature = 0.4
-    brain.max_tokens = 600
+    brain = agent_provider("image_prompt_translate")
     try:
         raw = await brain.complete(
             [

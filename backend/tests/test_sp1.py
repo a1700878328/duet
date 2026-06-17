@@ -296,6 +296,68 @@ async def test_run_ai_turn_persists_required_npc_label(
         assert "现在轮到我说了" in msg.content
 
 
+async def test_run_ai_turn_rewrites_json_dialogue_narration_leak(
+    monkeypatch, client: AsyncClient
+):
+    class LeakyJsonBrain:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return (
+                    '{"dialogue":"会长放下茶杯，朝你挑了挑眉。“有事？”",'
+                    '"state":"她坐在柜台后，指尖按着茶杯。",'
+                    '"narration_request":null}'
+                )
+            assert "专属回合" in messages[-1]["content"]
+            return "[公会会长]: 有事？[[旁白请求:会长把茶杯放回桌上。]]"
+
+    brain = LeakyJsonBrain()
+    monkeypatch.setattr(ws_mod, "brain", brain)
+    token = await _register(client, "bob")
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = (
+        await client.post(
+            "/api/rooms",
+            json={
+                "name": "npc json guard",
+                "character_name": "Erin",
+                "world_card": "ksim",
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+
+    async with SessionFactory() as session:
+        npc = await session.scalar(
+            select(NpcCard).where(
+                NpcCard.room_id == rid,
+                NpcCard.name == "公会会长",
+            )
+        )
+        assert npc is not None
+
+    coord = ws_mod.RoomCoordinator(room_id=rid)
+    await ws_mod._run_ai_turn(coord, npc)
+
+    async with SessionFactory() as session:
+        msg = await session.scalar(
+            select(ws_mod.Message)
+            .where(
+                ws_mod.Message.room_id == rid,
+                ws_mod.Message.speaker_label == "公会会长",
+            )
+            .order_by(ws_mod.Message.seq.desc())
+            .limit(1)
+        )
+        assert msg is not None
+        assert msg.content == "有事？"
+        assert "会长放下茶杯" not in msg.content
+        assert brain.calls == 2
+
+
 async def test_alternate_form_updates_existing_npc_instead_of_duplication(
     client: AsyncClient,
 ):

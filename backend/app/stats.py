@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any
 
-from .brain import BrainProvider, default_provider
+from .brain import BrainProvider, agent_provider
 from .json_utils import parse_json_object as _parse_obj
 
 # 数值字段（int）。基础属性 + 淫乱向经验/开发。
@@ -332,7 +332,7 @@ async def judge_stat_delta(
     deterministic_text: str | None = None,
 ) -> dict[str, Any]:
     """裁判：看本回合剧情，吐出属性增量 dict（可空）。"""
-    brain = brain or default_provider()
+    brain = brain or agent_provider("stats_judge")
     lv = current_stats.get("等级")
     lewd = current_stats.get("淫乱")
     money = current_stats.get("金钱")

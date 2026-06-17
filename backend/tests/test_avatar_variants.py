@@ -233,7 +233,7 @@ async def test_player_evolve_merges_persona_and_appearance(monkeypatch, client):
     async def fake_generate_portrait(*_args, **_kwargs):
         return {"url": "/media/generated/evolved.png"}
 
-    monkeypatch.setattr(rooms_mod, "default_provider", lambda: EvolveBrain())
+    monkeypatch.setattr(rooms_mod, "agent_provider", lambda _agent: EvolveBrain())
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)
@@ -265,7 +265,7 @@ async def test_evolve_routes_accept_put_and_npc_needs_no_body(monkeypatch, clien
     async def fake_generate_portrait(*_args, **_kwargs):
         return {"url": "/media/generated/evolved-npc.png"}
 
-    monkeypatch.setattr(rooms_mod, "default_provider", lambda: TagBrain())
+    monkeypatch.setattr(rooms_mod, "agent_provider", lambda _agent: TagBrain())
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)
