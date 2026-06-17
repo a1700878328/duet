@@ -62,3 +62,29 @@ async def test_generate_character_options_retries_empty_parse() -> None:
     drafts = await generate_character_options("ksim", None, 1, brain=brain)
 
     assert len(drafts) == 0
+
+
+@pytest.mark.asyncio
+async def test_described_variants_preserve_visual_requirements(monkeypatch) -> None:
+    seen: list[str] = []
+
+    async def fake_design_character(description, **_kwargs):
+        seen.append(description)
+        return {
+            "name": f"候选{len(seen)}",
+            "persona": "冷静寡言的巡礼者",
+            "appearance": "黑色修女服，戴单眼眼罩",
+            "voice_id": "年轻女性，低声",
+        }
+
+    monkeypatch.setattr(
+        "app.imagegen.tutorial_designer.design_character",
+        fake_design_character,
+    )
+
+    drafts = await generate_character_options("ksim", "戴眼罩的修女", 3)
+
+    assert len(drafts) == 3
+    assert all("戴眼罩的修女" in desc for desc in seen)
+    assert all("必须保留玩家原始描述" in desc for desc in seen[1:])
+    assert all("只在姓名、性格、背景经历" in desc for desc in seen[1:])

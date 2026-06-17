@@ -50,7 +50,11 @@ async def generate_character_options(
     for i in range(count):
         desc = hint or f"风格各异的玩家角色，第{i+1}个"
         if i > 0 and hint:
-            desc = f"{hint}（变体{i+1}：在职业、性格或外貌上与前一个角色有明显差异）"
+            desc = (
+                f"{hint}（变体{i+1}：必须保留玩家原始描述里的职业、服装、"
+                "道具和所有视觉细节；只在姓名、性格、背景经历、表情气质或"
+                "非核心小装饰上做差异）"
+            )
         elif i > 0:
             desc = f"风格与前面不同的玩家角色，第{i+1}个"
         draft = await design_character(
