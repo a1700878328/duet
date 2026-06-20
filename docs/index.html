@@ -16,8 +16,8 @@
         <strong>Duet</strong>
         <div>
           <a href="#features">機能</a>
+          <a href="#npc">NPCシステム</a>
           <a href="#screens">スクリーンショット</a>
-          <a href="#demo">デモ手順</a>
         </div>
       </nav>
       <div class="hero-grid">
@@ -80,6 +80,66 @@
         </div>
       </section>
 
+      <section id="npc" class="section npc-system">
+        <div class="section-head">
+          <p class="eyebrow">NPC System</p>
+          <h2>NPCの返信、内心、場面記録まで扱う物語エンジン</h2>
+        </div>
+        <div class="npc-grid">
+          <article class="character-board">
+            <div class="character-card">
+              <img src="site/assets/avatar-player.png" alt="プレイヤーのアバター" />
+              <div>
+                <strong>月月</strong>
+                <span>Player</span>
+              </div>
+            </div>
+            <div class="character-card">
+              <img src="site/assets/avatar-npc.png" alt="NPCのアバター" />
+              <div>
+                <strong>セリーヌ</strong>
+                <span>NPC · AI</span>
+              </div>
+            </div>
+            <div class="character-card">
+              <img src="site/assets/avatar-narrator.png" alt="ナレーターのアバター" />
+              <div>
+                <strong>ナレーター</strong>
+                <span>Director</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="npc-console">
+            <div class="chat-line player">
+              <img src="site/assets/avatar-player.png" alt="プレイヤー" />
+              <p>「掲示板の依頼を確認したい。危険度の低いものから教えて。」</p>
+            </div>
+            <div class="chat-line npc">
+              <img src="site/assets/avatar-npc.png" alt="NPC" />
+              <p>
+                <b>NPC返信</b>
+                「今朝追加された依頼なら、北門近くの魔力痕跡調査が一番安全です。」
+              </p>
+            </div>
+            <div class="mind-card">
+              <b>NPC内心</b>
+              <p>
+                新人に無理はさせたくない。けれど、歪みの調査を急がなければ町の結界がもたない。
+              </p>
+            </div>
+            <div class="scene-log-card">
+              <b>シーン記録</b>
+              <ul>
+                <li><span>第1週·1日目·早朝</span> 冒険者ギルドで依頼確認。</li>
+                <li><span>現在地</span> フリーシーン / 町の掲示板前。</li>
+                <li><span>裏側の動き</span> NPCは別地点でも継続して行動。</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section id="screens" class="section dark-band">
         <div class="section-head">
           <p class="eyebrow">Screenshots</p>
@@ -115,20 +175,6 @@
             <figcaption>シーン画像生成設定</figcaption>
           </figure>
         </div>
-      </section>
-
-      <section id="demo" class="section demo">
-        <div class="section-head">
-          <p class="eyebrow">Demo Flow</p>
-          <h2>発表時のおすすめ手順</h2>
-        </div>
-        <ol class="steps">
-          <li>言語を「日本語」に切り替え、公開ルーム画面でルームを作成します。</li>
-          <li>キャラクター選択を開き、デフォルト入室またはアカウントキャラを選びます。</li>
-          <li>AIナレーターが日本語で導入を書くことを確認します。</li>
-          <li>一言入力して、AI推敲・送信・NPC反応の流れを見せます。</li>
-          <li>ステータス、ワールド、移動、シーン画像生成の各パネルを順に開きます。</li>
-        </ol>
       </section>
     </main>
   </body>

@@ -177,8 +177,123 @@ img {
 }
 
 .feature-grid p,
-.steps {
+.mind-card p,
+.scene-log-card li {
   color: var(--muted);
+}
+
+.npc-system {
+  max-width: 1180px;
+}
+
+.npc-grid {
+  display: grid;
+  grid-template-columns: 0.82fr 1.18fr;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.character-board,
+.npc-console {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)),
+    var(--panel);
+}
+
+.character-board {
+  display: grid;
+  gap: 14px;
+  align-content: center;
+  padding: 22px;
+}
+
+.character-card {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.character-card img,
+.chat-line img {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.character-card strong {
+  display: block;
+  font-size: 20px;
+}
+
+.character-card span {
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.npc-console {
+  padding: 22px;
+}
+
+.chat-line {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.chat-line p,
+.mind-card,
+.scene-log-card {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.chat-line.npc p {
+  border-color: rgba(255, 122, 182, 0.45);
+  background: rgba(255, 122, 182, 0.1);
+}
+
+.chat-line b,
+.mind-card b,
+.scene-log-card b {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--gold);
+}
+
+.mind-card {
+  margin: 14px 0;
+  border-color: rgba(85, 224, 163, 0.35);
+}
+
+.scene-log-card ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.scene-log-card li {
+  margin: 8px 0;
+}
+
+.scene-log-card span {
+  display: inline-block;
+  min-width: 112px;
+  color: var(--accent-2);
+  font-weight: 800;
 }
 
 .dark-band {
@@ -217,21 +332,6 @@ img {
   font-weight: 700;
 }
 
-.demo {
-  max-width: 920px;
-}
-
-.steps {
-  margin: 0;
-  padding-left: 24px;
-  font-size: 18px;
-}
-
-.steps li {
-  margin: 12px 0;
-  padding-left: 8px;
-}
-
 @media (max-width: 860px) {
   .nav {
     align-items: flex-start;
@@ -240,6 +340,7 @@ img {
 
   .hero-grid,
   .feature-grid,
+  .npc-grid,
   .screens {
     grid-template-columns: 1fr;
   }
