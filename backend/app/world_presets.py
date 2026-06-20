@@ -72,8 +72,10 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "表面上是严肃的教官，实际上随时都在找机会把训练变成上床。"
         ),
         "appearance": (
-            "scarred muscular man, battle-scarred face, crew cut, worn leather "
-            "training armor, muscular arms covered in scars, guild training yard"
+            "1boy, adult male, rugged scarred muscular battle instructor, broad shoulders, "
+            "square jaw, short crew cut, stubble, battle-scarred face, worn leather "
+            "training armor, muscular arms covered in scars, stern masculine expression, "
+            "guild training yard"
         ),
         "voice_id": "粗犷低沉的中年男性嗓音，带着压迫感，尾音偶尔带着色情的玩味",
     },
@@ -140,8 +142,9 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "一旦进入状态就会变得非常淫荡，和平时的腼腆形成鲜明反差。"
         ),
         "appearance": (
-            "petty young mage girl, long messy hair, oversized wizard robe, "
-            "sheepish smile, flour on cheek from failed cooking, town street"
+            "1girl, petite young mage girl, long messy hair, oversized wizard robe, "
+            "soft sheepish smile, flour on cheek from failed cooking, cute gentle eyes, "
+            "small frame, town street"
         ),
         "voice_id": "年轻女性，清澈柔软，带着撒娇的尾音，害羞时会变小",
     },
@@ -242,7 +245,8 @@ KSIM_NPCS: list[dict[str, Any]] = [
             "说话慢条斯理，享受支配和调教的每一刻。"
         ),
         "appearance": (
-            "goblin shaman, crude staff, bone necklace, glowing red eyes, "
+            "1boy, small adult male goblin shaman, green skin, sharp ears, hooked nose, "
+            "glowing red eyes, sly grin, hunched wiry body, crude staff, bone necklace, "
             "tattered robe covered in strange symbols, dark cave lair"
         ),
         "voice_id": (

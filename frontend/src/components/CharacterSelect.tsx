@@ -21,6 +21,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
   const [mode, setMode] = useState<Mode>("browse");
   const [hint, setHint] = useState("");
   const [customName, setCustomName] = useState("");
+  const [draftNsfw, setDraftNsfw] = useState(false);
   const [presetCharacters, setPresetCharacters] = useState<NpcCard[]>([]);
   const [libraryCards, setLibraryCards] = useState<UserCharacterCard[]>([]);
   const [protagonist, setProtagonist] = useState<CharDraft | null>(null);
@@ -30,7 +31,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
   const reqId = useRef(0);
 
   const fetchOptions = useCallback(
-    async (body: { count?: number; hint?: string }) => {
+    async (body: { count?: number; hint?: string; nsfw?: boolean }) => {
       const id = ++reqId.current;
       const targetCount = body.count ?? 3;
       setExpectedCount(targetCount);
@@ -38,7 +39,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       setError(null);
       setDrafts([]);
       try {
-        const result = await api.characterOptions(roomId, body);
+        const result = await api.characterOptions(roomId, {
+          ...body,
+          nsfw: body.nsfw ?? draftNsfw,
+        });
         if (id !== reqId.current) return; // superseded
         if (!result.length) {
           setError("AI 这次没有生成候选。再点一次，或直接自己描述进场。");
@@ -53,7 +57,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         if (id === reqId.current) setLoading(false);
       }
     },
-    [roomId],
+    [draftNsfw, roomId],
   );
 
   useEffect(() => {
@@ -95,6 +99,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         character_name: draft.name,
         persona: draft.persona,
         appearance: draft.appearance ?? null,
+        appearance_tags: draft.appearance_tags ?? null,
         voice_id: draft.voice_id ?? null,
         voice_ref_url: draft.voice_ref_url ?? null,
         voice_ref_text: draft.voice_ref_text ?? null,
@@ -118,6 +123,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         character_name: draft.name,
         persona: draft.persona,
         appearance: draft.appearance ?? null,
+        appearance_tags: draft.appearance_tags ?? null,
         voice_id: draft.voice_id ?? null,
         voice_ref_url: draft.voice_ref_url ?? null,
         voice_ref_text: draft.voice_ref_text ?? null,
@@ -141,6 +147,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         character_name: npc.name,
         persona: npc.persona,
         appearance: npc.appearance ?? null,
+        appearance_tags: npc.appearance_tags ?? null,
         voice_id: npc.voice_id ?? null,
         voice_ref_url: npc.voice_ref_url ?? null,
         voice_ref_text: npc.voice_ref_text ?? null,
@@ -165,6 +172,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         character_name: card.name,
         persona: card.persona,
         appearance: card.appearance ?? null,
+        appearance_tags: card.appearance_tags ?? null,
         voice_id: card.voice_id ?? null,
         voice_ref_url: card.voice_ref_url ?? null,
         voice_ref_text: card.voice_ref_text ?? null,
@@ -186,7 +194,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
     setPicking(null);
     setError(null);
     const namePart = customName.trim() ? `角色名倾向：${customName.trim()}。` : "";
-    void fetchOptions({ count: 3, hint: `${namePart}${hint.trim()}` });
+    void fetchOptions({ count: 3, hint: `${namePart}${hint.trim()}`, nsfw: draftNsfw });
   }
 
   const slots = loading
@@ -199,6 +207,11 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       ]
     : drafts;
 
+  const randomCandidateCount =
+    typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches
+      ? 1
+      : 3;
+
   return (
     <div className="char-select-overlay" role="dialog" aria-modal="true">
       <div className="char-select-box">
@@ -206,7 +219,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
           <div>
             <h2>选择你的角色</h2>
             <p className="muted">
-              可以直接扮演世界角色，也可以稍后再让 AI 生成带立绘的原创候选。
+              可以直接扮演世界角色，也可以稍后让 AI 生成原创角色参考图，再自动裁出头像。
             </p>
           </div>
           <button
@@ -223,7 +236,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         {loading && (
           <p className="muted char-select-hint">
             {MEDIA_GENERATION_ENABLED
-              ? "✨ 正在生成角色与立绘…（较慢，约需 1–2 分钟，请稍候）"
+              ? "✨ 正在生成角色与参考图…（较慢，约需 1–2 分钟，请稍候）"
               : "✨ 正在生成角色草稿…（生图已关闭，可直接选择文字角色卡）"}
           </p>
         )}
@@ -250,7 +263,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="char-card-noart muted">（暂无立绘）</div>
+                        <div className="char-card-noart muted">（暂无参考图）</div>
                       )}
                     </div>
                   )}
@@ -302,7 +315,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                         loading="lazy"
                       />
                     ) : (
-                      <div className="char-card-noart muted">（暂无默认立绘）</div>
+                      <div className="char-card-noart muted">（暂无默认图）</div>
                     )}
                   </div>
                 )}
@@ -358,7 +371,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="char-card-noart muted">（暂无默认立绘）</div>
+                        <div className="char-card-noart muted">（暂无默认图）</div>
                       )}
                     </div>
                   )}
@@ -392,7 +405,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         <section className="char-select-section">
           <div className="char-select-section-head">
             <h3>原创角色</h3>
-            <span className="muted">按需生成，带立绘会比较慢</span>
+            <span className="muted">按需生成，参考图会比较慢</span>
           </div>
           {loading || drafts.length > 0 ? (
             <div
@@ -411,7 +424,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : draft ? (
-                        <div className="char-card-noart muted">（暂无立绘）</div>
+                        <div className="char-card-noart muted">（暂无参考图）</div>
                       ) : (
                         <div className="char-card-skeleton">
                           <span className="spinner spinner-dark" />
@@ -445,7 +458,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                             进场中…
                           </>
                         ) : (
-                          "选 TA"
+                          "选图并生成头像"
                         )}
                       </button>
                     )}
@@ -455,7 +468,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
             </div>
           ) : (
             <div className="char-select-empty muted">
-              还没有原创候选。点击「AI 发散一批」时才会开始生成角色和立绘。
+              还没有原创候选。点击「AI 发散一批」时才会开始生成角色和参考图。
             </div>
           )}
         </section>
@@ -477,6 +490,15 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               onChange={(e) => setHint(e.target.value)}
               disabled={picking !== null || loading}
             />
+            <label className="npc-check-item">
+              <input
+                type="checkbox"
+                checked={draftNsfw}
+                onChange={(e) => setDraftNsfw(e.target.checked)}
+                disabled={picking !== null || loading}
+              />
+              NSFW
+            </label>
             <button
               className="btn btn-primary"
               disabled={picking !== null || loading || !hint.trim()}
@@ -503,7 +525,9 @@ export function CharacterSelect({ roomId, onDone }: Props) {
           <div className="char-select-actions">
             <button
               className="btn"
-              onClick={() => void fetchOptions({ count: 3 })}
+              onClick={() =>
+                void fetchOptions({ count: randomCandidateCount, nsfw: draftNsfw })
+              }
               disabled={loading || picking !== null}
             >
               {loading ? (
@@ -526,6 +550,15 @@ export function CharacterSelect({ roomId, onDone }: Props) {
             >
               ✍️ 按描述生成
             </button>
+            <label className="npc-check-item">
+              <input
+                type="checkbox"
+                checked={draftNsfw}
+                onChange={(e) => setDraftNsfw(e.target.checked)}
+                disabled={picking !== null || loading}
+              />
+              NSFW
+            </label>
           </div>
         )}
       </div>

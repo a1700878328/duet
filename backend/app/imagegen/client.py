@@ -14,7 +14,6 @@ from typing import Any
 import httpx
 
 from .config import COMFY_URL, MANAGER_URL
-from .guard import assert_workflow_safe
 
 
 async def ensure_comfyui(timeout: float = 180.0) -> bool:
@@ -57,9 +56,7 @@ async def submit_and_wait(
     """Submit a graph and wait for the resulting image bytes.
 
     Returns {filename, path(None), bytes, prompt_id} on success, else {error: ...}.
-    Runs the color/named-char guards before submission (fail-closed).
     """
-    assert_workflow_safe(workflow)
     client_id = f"duet-{int(time.time())}"
 
     async with httpx.AsyncClient() as client:

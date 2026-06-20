@@ -305,7 +305,10 @@ class VoiceClient:
         if not key:
             return None
         # Deterministic seed per character description for consistent voice design.
-        design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
+        design_seed = (
+            int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
+            & 0x7FFFFFFF
+        )
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,
@@ -349,7 +352,10 @@ class VoiceClient:
         if not key:
             return None
         headers = {"xi-api-key": key, "Content-Type": "application/json"}
-        design_seed = int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
+        design_seed = (
+            int(hashlib.sha1(voice_description.encode()).hexdigest()[:8], 16)
+            & 0x7FFFFFFF
+        )
         payload = {
             "voice_description": _anime_voice_description(voice_description),
             "model_id": ELEVEN_DESIGN_MODEL,

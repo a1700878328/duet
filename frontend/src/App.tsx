@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import { AuthPage } from "./pages/AuthPage";
+import { AgentsPage } from "./pages/AgentsPage";
 import { RoomsPage } from "./pages/RoomsPage";
 import { RoomPage } from "./pages/RoomPage";
 import type { ReactNode } from "react";
@@ -31,6 +32,14 @@ export function App() {
         element={
           <RequireAuth>
             <RoomPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/agents"
+        element={
+          <RequireAuth>
+            <AgentsPage />
           </RequireAuth>
         }
       />

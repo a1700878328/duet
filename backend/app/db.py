@@ -34,7 +34,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "scenes_meta": "TEXT",
     },
     "room_members": {
-        "appearance": "VARCHAR(512)",
+        "appearance": "VARCHAR(2000)",
         "appearance_tags": "TEXT",
         "persona": "TEXT",
         "voice_id": "VARCHAR(200)",
@@ -46,6 +46,7 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "stats": "TEXT",
     },
     "user_character_cards": {
+        "appearance_tags": "TEXT",
         "voice_ref_url": "VARCHAR(256)",
         "voice_ref_text": "TEXT",
         "voice_variants": "TEXT",

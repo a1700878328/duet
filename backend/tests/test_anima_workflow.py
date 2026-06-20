@@ -1,5 +1,13 @@
-from app.imagegen.anima import build_anima_workflow, build_baobao_anima_workflow
+import pytest
+
+from app.imagegen.anima import (
+    build_anima_regional_ipadapter_workflow,
+    build_anima_workflow,
+    build_baobao_anima_workflow,
+)
+from app.imagegen import anima as anima_mod
 from app.imagegen.portrait import build_portrait_prompt
+from app.imagegen import portrait as portrait_mod
 from app.imagegen.scene_prompt import build_scene_prompt_sync
 
 
@@ -116,6 +124,64 @@ def test_baobao_workflow_builds_ntrmix_graph() -> None:
     assert graph["57"]["inputs"]["model"] == ["3", 0]
 
 
+def test_regional_ipadapter_keeps_public_ref_order_for_current_masks(
+    monkeypatch,
+) -> None:
+    def fake_copy(path):
+        return str(path)
+
+    monkeypatch.setattr(anima_mod, "_copy_reference_to_comfy_input", fake_copy)
+
+    graph = build_anima_regional_ipadapter_workflow(
+        "left knight, right thief",
+        reference_paths=["left_knight.png", "right_thief.png"],
+        seed=123,
+    )
+
+    assert "left_knight" in graph["300"]["inputs"]["image"]
+    assert "right_thief" in graph["301"]["inputs"]["image"]
+
+
+def test_regional_ipadapter_can_swap_refs_for_alternate_mask_geometry(
+    monkeypatch,
+) -> None:
+    def fake_copy(path):
+        return str(path)
+
+    monkeypatch.setattr(anima_mod, "_copy_reference_to_comfy_input", fake_copy)
+
+    graph = build_anima_regional_ipadapter_workflow(
+        "left knight, right thief",
+        reference_paths=["left_knight.png", "right_thief.png"],
+        seed=123,
+        swap_refs=True,
+    )
+
+    assert "right_thief" in graph["300"]["inputs"]["image"]
+    assert "left_knight" in graph["301"]["inputs"]["image"]
+
+
+def test_regional_ipadapter_can_use_vertical_masks(monkeypatch) -> None:
+    def fake_copy(path):
+        return str(path)
+
+    def fake_mask(side, *, width, height):
+        return f"{side}_mask.png"
+
+    monkeypatch.setattr(anima_mod, "_copy_reference_to_comfy_input", fake_copy)
+    monkeypatch.setattr(anima_mod, "_region_mask_to_comfy_input", fake_mask)
+
+    graph = build_anima_regional_ipadapter_workflow(
+        "upper knight, lower thief",
+        reference_paths=["upper_knight.png", "lower_thief.png"],
+        seed=123,
+        region_layout="vertical",
+    )
+
+    assert graph["302"]["inputs"]["image"] == "top_mask.png"
+    assert graph["303"]["inputs"]["image"] == "bottom_mask.png"
+
+
 def test_baobao_workflow_can_disable_ntrmix_for_clean_style() -> None:
     graph = build_baobao_anima_workflow(
         "A clean anime scene.",
@@ -128,17 +194,22 @@ def test_baobao_workflow_can_disable_ntrmix_for_clean_style() -> None:
     assert graph["57"]["inputs"]["model"] == ["60", 0]
 
 
-def test_portrait_prompt_passes_ai_output_through() -> None:
-    """AI controls the full creative prompt — only nsfw/negative are system-added."""
+def test_portrait_prompt_keeps_ai_prompt_and_adds_card_guards() -> None:
     positive, negative = build_portrait_prompt(
-        "silver hair, blue eyes, light armor, closed mouth, looking at viewer",
+        "1girl, full body, silver hair, blue eyes, light armor, ornate cathedral",
         name="莉娜",
         persona="温柔但有点害羞的新人骑士",
     )
 
+    assert "1girl" in positive
     assert "silver hair, blue eyes, light armor" in positive
+    assert "full body" not in positive
+    assert "close cowboy shot" in positive
+    assert "NTRMix pretty face recipe" in positive
+    assert "colored eyelashes" in positive
     assert "nsfw" not in positive  # nsfw flag not set
     assert "passport photo" in negative
+    assert "headshot" in negative
 
 
 def test_portrait_prompt_adds_nsfw_prefix_when_enabled() -> None:
@@ -151,12 +222,97 @@ def test_portrait_prompt_adds_nsfw_prefix_when_enabled() -> None:
 
     assert positive.startswith("nsfw, explicit")
     assert "silver hair, blue eyes, light armor" in positive
+    assert "cowboy shot" in positive
+    assert "NTRMix pretty face recipe" in positive
+
+
+def test_portrait_prompt_avatar_mode_is_face_first() -> None:
+    positive, negative = build_portrait_prompt(
+        "1girl, silver hair, blue eyes, light armor, ornate collar",
+        name="莉娜",
+        persona="温柔但有点害羞的新人骑士",
+        mode="avatar",
+    )
+
+    assert "head-and-shoulders crop" in positive
+    assert "face fills most of the frame" in positive
+    assert "no standing pose" in positive
+    assert "large expressive face" in positive
+    assert "full body" in negative
+    assert "distant character" in negative
+
+
+def test_portrait_prompt_reference_mode_keeps_character_card_framing() -> None:
+    positive, negative = build_portrait_prompt(
+        "1girl, silver hair, blue eyes, light armor",
+        name="莉娜",
+        persona="温柔但有点害羞的新人骑士",
+        mode="reference",
+    )
+
+    assert "head-and-shoulders crop" not in positive
+    assert "NTRMix pretty face recipe" in positive
+    assert "close cowboy shot" in positive
+    assert "extreme close-up" in negative
+
+
+def test_portrait_prompt_adds_gender_and_filters_unrequested_animal_theme() -> None:
+    positive, _negative = build_portrait_prompt(
+        "black_hair, short_hair, golden_eyes, cat_theme, red_black_outfit",
+        name="黑羽盗贼米拉",
+        persona="敏捷、狡黠、警惕的女盗贼",
+    )
+
+    assert "1girl" in positive
+    assert "cat_theme" not in positive
+    assert "golden eyes" in positive
+    assert "red black outfit" in positive
 
 
 def test_portrait_prompt_empty_appearance_returns_empty() -> None:
     positive, negative = build_portrait_prompt("")
     assert positive == ""
     assert "passport photo" in negative
+
+
+@pytest.mark.asyncio
+async def test_portrait_translation_never_falls_back_to_chinese(monkeypatch) -> None:
+    async def empty_translate(*_args, **_kwargs):
+        return ""
+
+    monkeypatch.setattr(portrait_mod.agent, "run", empty_translate)
+
+    tags = await portrait_mod._translate_to_tags(
+        "黑色修女服，白色头巾，黑色眼罩遮住双眼，银灰色短发",
+        player_input="戴眼罩的修女",
+    )
+
+    assert "修女" not in tags
+    assert "nun" in tags
+    assert "blindfold" in tags
+
+
+@pytest.mark.asyncio
+async def test_portrait_english_tags_reject_mixed_chinese_ai_output(monkeypatch) -> None:
+    async def mixed_chinese_prompt(*_args, **_kwargs):
+        return "1girl, solo, 白金长发，红色眼睛，黑红贵族战斗礼服"
+
+    monkeypatch.setattr(portrait_mod.agent, "run", mixed_chinese_prompt)
+
+    tags = await portrait_mod._english_portrait_tags(
+        "白金长发，红色眼睛，黑红贵族战斗礼服，佩剑和红宝石耳坠",
+        name="夜璃",
+        persona="暗黑贵族剑士",
+        nsfw=False,
+        brain=None,
+        player_input="不要白底，不要头像",
+    )
+
+    assert "白金" not in tags
+    assert "红色" not in tags
+    assert "platinum blonde hair" in tags
+    assert "red eyes" in tags
+    assert "black and red outfit" in tags
 
 
 def test_scene_prompt_uses_location_background_not_blank_backdrop() -> None:

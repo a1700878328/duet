@@ -52,3 +52,29 @@ def test_overpaying_creates_debt_if_text_says_it_happened() -> None:
     assert delta == {"金钱": -100, "状态_add": ["负债"]}
     assert updated["金钱"] == -1
     assert "负债" in updated["状态"]
+
+
+def test_goblin_failure_context_creates_captive_delta() -> None:
+    stats = default_stats()
+
+    delta = infer_deterministic_delta(
+        "艾琳在哥布林巢穴深处遭遇伏击，被困后逐渐失去主动权。",
+        stats,
+    )
+
+    assert delta["淫乱"] >= 4
+    assert delta["欲望"] >= 2
+    assert delta["意志"] == -1
+    assert "监禁:哥布林 1" in delta["状态_add"]
+
+
+def test_goblin_failure_context_does_not_duplicate_captive_state() -> None:
+    stats = default_stats()
+    stats["状态"] = ["监禁:哥布林 1"]
+
+    delta = infer_deterministic_delta(
+        "哥布林巢穴里局势恶化，艾琳仍在挣扎。",
+        stats,
+    )
+
+    assert "状态_add" not in delta or "监禁:哥布林 1" not in delta["状态_add"]

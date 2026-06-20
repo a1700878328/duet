@@ -1,4 +1,6 @@
 import type {
+  AgentTask,
+  AgentTaskUpdate,
   AuthResponse,
   CharDraft,
   AvatarVariant,
@@ -18,6 +20,7 @@ export interface MeCardBody {
   character_name?: string;
   persona?: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
   avatar_url?: string | null;
   voice_ref_url?: string | null;
@@ -31,6 +34,7 @@ export interface UserCharacterCardBody {
   name: string;
   persona: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
@@ -44,6 +48,7 @@ export interface NpcBody {
   name: string;
   persona: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
 }
 
@@ -158,6 +163,19 @@ export const api = {
 
   me: () => request<{ user: User }>("/me"),
 
+  listAgents: () => request<AgentTask[]>("/agents"),
+
+  updateAgent: (name: string, body: AgentTaskUpdate) =>
+    request<AgentTask>(`/agents/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  resetAgent: (name: string) =>
+    request<AgentTask>(`/agents/${encodeURIComponent(name)}/reset`, {
+      method: "POST",
+    }),
+
   listMyCharacterCards: () =>
     request<UserCharacterCard[]>("/me/character-cards"),
 
@@ -224,7 +242,7 @@ export const api = {
   // SLOW (~count*40s): one portrait per draft. Nothing is persisted.
   characterOptions: (
     roomId: string,
-    body: { count?: number; hint?: string },
+    body: { count?: number; hint?: string; nsfw?: boolean },
   ) =>
     request<CharDraft[]>(`/rooms/${roomId}/character-options`, {
       method: "POST",
@@ -288,6 +306,11 @@ export const api = {
   // Generate an NPC's portrait (slow ~30-60s).
   generateNpcAvatar: (roomId: string, npcId: number) =>
     request<NpcCard>(`/rooms/${roomId}/npcs/${npcId}/avatar`, {
+      method: "POST",
+    }),
+
+  regenerateAllNpcAvatars: (roomId: string) =>
+    request<NpcCard[]>(`/rooms/${roomId}/npcs/avatar/regenerate-all`, {
       method: "POST",
     }),
 

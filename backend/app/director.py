@@ -2,8 +2,7 @@
 
 from typing import Any
 
-from .brain import BrainProvider, agent_provider
-from .json_utils import parse_json_object as _parse_obj
+from .agent_sdk import agent
 from .models import NpcCard, RoomMember
 
 
@@ -22,7 +21,6 @@ async def judge_world_beat(
     known_scenes: list[str] | None = None,
     world_lore: str = "",
     scene_context: str = "",
-    brain: BrainProvider | None = None,
 ) -> dict[str, Any]:
     """返回世界事件计划；NPC 是否发言由 NPC 自己判定。
 
@@ -31,7 +29,6 @@ async def judge_world_beat(
     time_jump = 只有显式快进/允许跳时才保留的时间推进描述，否则 None。
     time_advance_steps/scene_change = 对话明确触发的自然时间/场景变化。
     """
-    brain = brain or agent_provider("director")
     roster = "\n".join(f"  id={n.id} 「{n.name}」：{n.persona}" for n in npcs)
     players = "、".join(m.character_name for m in members) or "（无）"
     world = (
@@ -140,10 +137,11 @@ async def judge_world_beat(
         f"最近场面：\n{recent_scene or '（刚开场）'}{lore_block}\n\n"
         f"{skip_note}\n{auto_note}"
     )
-    raw = await brain.complete(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    )
-    data = _parse_obj(raw)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    data = await agent.run("director", messages=messages)
     tj = data.get("time_jump")
     time_jump = tj.strip() if isinstance(tj, str) and tj.strip() else None
     if not (force_timeskip or allow_time_jump):
@@ -179,7 +177,7 @@ async def judge_world_beat(
                 {
                     "name": str(d["name"])[:128],
                     "persona": str(d.get("persona", ""))[:4000],
-                    "appearance": str(d["appearance"])[:512]
+                    "appearance": str(d["appearance"])[:2000]
                     if d.get("appearance")
                     else None,
                     "voice_id": str(d["voice_id"])[:200] if d.get("voice_id") else None,

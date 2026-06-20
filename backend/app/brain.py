@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
+from openai import AsyncOpenAI
 
 from .config import settings
 
@@ -31,16 +31,24 @@ class BrainProvider:
     max_tokens: int = 600
     timeout: float = 120.0
 
+    def _client(self) -> AsyncOpenAI:
+        return AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout,
+        )
+
     def _body(self, messages: list[dict[str, str]], *, stream: bool) -> dict[str, Any]:
+        extra_body: dict[str, Any] = {
+            # Best-effort: ask the model to skip thinking. Unknown params are
+            # tolerated server-side; content-only filtering keeps us correct.
+            "chat_template_kwargs": {"thinking": False},
+        }
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "stream": stream,
-            # Best-effort: ask the model to skip thinking. Unknown params are
-            # tolerated server-side; content-only filtering keeps us correct.
-            "chat_template_kwargs": {"thinking": False},
         }
         # Merge caller-supplied extras (e.g. Qwen's enable_thinking=false),
         # allowing nested chat_template_kwargs to be overridden/extended.
@@ -48,11 +56,12 @@ class BrainProvider:
             if (
                 key == "chat_template_kwargs"
                 and isinstance(value, dict)
-                and isinstance(body.get(key), dict)
+                and isinstance(extra_body.get(key), dict)
             ):
-                body[key] = {**body[key], **value}
+                extra_body[key] = {**extra_body[key], **value}
             else:
-                body[key] = value
+                extra_body[key] = value
+        body["extra_body"] = extra_body
         return body
 
     @property
@@ -65,34 +74,24 @@ class BrainProvider:
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         """Yield content chunks (reasoning_content ignored)."""
         body = self._body(messages, stream=True)
-        async with httpx.AsyncClient(
-            base_url=self.base_url, timeout=self.timeout
-        ) as client:
-            async with client.stream(
-                "POST",
-                "/chat/completions",
-                headers=self._headers,
-                json=body,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    chunk = _parse_sse_content(line)
-                    if chunk:
-                        yield chunk
+        body.pop("stream", None)
+        client = self._client()
+        stream = await client.chat.completions.create(**body, stream=True)
+        async for event in stream:
+            choice = (event.choices or [None])[0]
+            delta = getattr(choice, "delta", None) if choice is not None else None
+            content = getattr(delta, "content", None) if delta is not None else None
+            if content:
+                yield content
 
     async def complete(self, messages: list[dict[str, str]]) -> str:
         """Non-streaming helper. Returns full content (reasoning dropped)."""
         body = self._body(messages, stream=False)
-        async with httpx.AsyncClient(
-            base_url=self.base_url, timeout=self.timeout
-        ) as client:
-            resp = await client.post(
-                "/chat/completions", headers=self._headers, json=body
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        choice = (data.get("choices") or [{}])[0]
-        return (choice.get("message") or {}).get("content") or ""
+        body.pop("stream", None)
+        resp = await self._client().chat.completions.create(**body)
+        choice = (resp.choices or [None])[0]
+        message = getattr(choice, "message", None) if choice is not None else None
+        return getattr(message, "content", None) or ""
 
 
 def _parse_sse_content(line: str) -> str | None:
@@ -132,10 +131,11 @@ AGENT_PROFILES: dict[str, AgentProfile] = {
     "stats_judge": AgentProfile(temperature=0.15, max_tokens=500),
     "npc_move_consent": AgentProfile(temperature=0.2, max_tokens=500),
     # Expressive writing.
-    "npc_dialogue": AgentProfile(temperature=0.9, max_tokens=800),
+    "npc_dialogue": AgentProfile(temperature=1.05, max_tokens=1400),
+    "npc_dialogue_text": AgentProfile(temperature=1.05, max_tokens=1400),
     "ending": AgentProfile(temperature=0.75, max_tokens=800),
     # Design / prompt work.
-    "character_design": AgentProfile(temperature=0.65, max_tokens=1200),
+    "character_design": AgentProfile(temperature=0.65, max_tokens=1800),
     "npc_design": AgentProfile(temperature=0.65, max_tokens=1000),
     "image_prompt": AgentProfile(temperature=0.5, max_tokens=1000),
     "image_prompt_translate": AgentProfile(temperature=0.35, max_tokens=600),
@@ -143,6 +143,8 @@ AGENT_PROFILES: dict[str, AgentProfile] = {
     # Background maintenance.
     "npc_enrich": AgentProfile(temperature=0.25, max_tokens=700),
     "card_rewrite": AgentProfile(temperature=0.5, max_tokens=800),
+    "voice_design": AgentProfile(temperature=0.45, max_tokens=260),
+    "voice_reference": AgentProfile(temperature=0.65, max_tokens=260),
 }
 
 
@@ -154,6 +156,15 @@ def agent_provider(agent_name: str) -> BrainProvider:
     clearer call-site intent.
     """
     profile = AGENT_PROFILES.get(agent_name, AGENT_PROFILES["default"])
+    return provider_from_profile(agent_name, profile)
+
+
+def provider_from_profile(agent_name: str, profile: AgentProfile) -> BrainProvider:
+    """Return a provider using an explicit profile.
+
+    This lets higher-level task registries define task-local runtime knobs while
+    keeping older ``agent_provider(name)`` call sites compatible.
+    """
     return BrainProvider(
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,

@@ -36,10 +36,13 @@ async def _register(client: AsyncClient, username: str = "alice") -> str:
     return resp.json()["token"]
 
 
-async def _room(client: AsyncClient, token: str) -> int:
+async def _room(client: AsyncClient, token: str, world_card: str | None = None) -> int:
+    payload = {"name": "variants", "character_name": "Erin"}
+    if world_card:
+        payload["world_card"] = world_card
     resp = await client.post(
         "/api/rooms",
-        json={"name": "variants", "character_name": "Erin"},
+        json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200, resp.text
@@ -49,15 +52,21 @@ async def _room(client: AsyncClient, token: str) -> int:
 @pytest.mark.asyncio
 async def test_member_avatar_generation_keeps_variants(monkeypatch, client):
     urls = iter(["/media/generated/a.png", "/media/generated/b.png"])
+    seen_nsfw: list[bool | None] = []
+
+    async def fake_agent_run(*_args, **_kwargs):
+        return "black nun habit, white headdress, black blindfold"
 
     async def fake_generate_portrait(*_args, **_kwargs):
-        return {"url": next(urls)}
+        seen_nsfw.append(_kwargs.get("nsfw"))
+        return {"url": next(urls), "appearance_tags": "black nun habit, white headdress"}
 
+    monkeypatch.setattr(rooms_mod.agent, "run", fake_agent_run)
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
-    rid = await _room(client, token)
+    rid = await _room(client, token, world_card="ksim")
 
     first = await client.post(f"/api/rooms/{rid}/me-card/avatar", headers=headers)
     assert first.status_code == 200, first.text
@@ -69,6 +78,7 @@ async def test_member_avatar_generation_keeps_variants(monkeypatch, client):
     second = await client.post(f"/api/rooms/{rid}/me-card/avatar", headers=headers)
     assert second.status_code == 200, second.text
     assert second.json()["avatar_url"] == "/media/generated/b.png"
+    assert second.json()["appearance_tags"] == "black nun habit, white headdress"
     assert [v["url"] for v in second.json()["avatar_variants"]] == [
         "/media/generated/b.png",
         "/media/generated/a.png",
@@ -85,6 +95,82 @@ async def test_member_avatar_generation_keeps_variants(monkeypatch, client):
         "/media/generated/a.png",
         "/media/generated/b.png",
     }
+    assert seen_nsfw == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_character_options_portraits_are_not_forced_explicit(monkeypatch, client):
+    seen_nsfw: list[bool | None] = []
+
+    async def fake_generate_character_options(*_args, **_kwargs):
+        return [
+            {
+                "name": "塞西莉亚",
+                "persona": "戴眼罩的盲眼修女，温柔克制",
+                "appearance": "黑色修女服，白色头巾，黑色眼罩",
+                "voice_id": "年轻女性，低声",
+            }
+        ]
+
+    async def fake_generate_portrait(*_args, **_kwargs):
+        seen_nsfw.append(_kwargs.get("nsfw"))
+        return {"url": "/media/generated/nun.png"}
+
+    monkeypatch.setattr(
+        rooms_mod, "generate_character_options", fake_generate_character_options
+    )
+    monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
+
+    token = await _register(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = await _room(client, token, world_card="ksim")
+
+    resp = await client.post(
+        f"/api/rooms/{rid}/character-options",
+        json={"hint": "戴眼罩的修女", "count": 1},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()[0]["avatar_url"] == "/media/generated/nun.png"
+    assert seen_nsfw == [False]
+
+
+@pytest.mark.asyncio
+async def test_character_options_can_request_nsfw_portraits(monkeypatch, client):
+    seen_nsfw: list[bool | None] = []
+
+    async def fake_generate_character_options(*_args, **_kwargs):
+        return [
+            {
+                "name": "塞西莉亚",
+                "persona": "危险可爱的盲眼修女",
+                "appearance": "白发短发，黑色修女服，黑色眼罩",
+                "voice_id": "年轻女性，低声",
+            }
+        ]
+
+    async def fake_generate_portrait(*_args, **_kwargs):
+        seen_nsfw.append(_kwargs.get("nsfw"))
+        return {"url": "/media/generated/nsfw-nun.png"}
+
+    monkeypatch.setattr(
+        rooms_mod, "generate_character_options", fake_generate_character_options
+    )
+    monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
+
+    token = await _register(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = await _room(client, token, world_card="ksim")
+
+    resp = await client.post(
+        f"/api/rooms/{rid}/character-options",
+        json={"hint": "眼罩修女", "count": 1, "nsfw": True},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert seen_nsfw == [True]
 
 
 @pytest.mark.asyncio
@@ -180,15 +266,21 @@ async def test_member_voice_generation_keeps_card_when_audio_provider_fails(
 @pytest.mark.asyncio
 async def test_npc_avatar_generation_keeps_variants(monkeypatch, client):
     urls = iter(["/media/generated/npc-a.png", "/media/generated/npc-b.png"])
+    seen_nsfw: list[bool | None] = []
+
+    async def fake_agent_run(*_args, **_kwargs):
+        return "black nun habit, white headdress, black blindfold"
 
     async def fake_generate_portrait(*_args, **_kwargs):
-        return {"url": next(urls)}
+        seen_nsfw.append(_kwargs.get("nsfw"))
+        return {"url": next(urls), "appearance_tags": "black nun habit, white headdress"}
 
+    monkeypatch.setattr(rooms_mod.agent, "run", fake_agent_run)
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
-    rid = await _room(client, token)
+    rid = await _room(client, token, world_card="ksim")
     created = await client.post(
         f"/api/rooms/{rid}/npcs",
         json={"name": "Guide", "persona": "Helpful guide", "appearance": "woman"},
@@ -202,10 +294,12 @@ async def test_npc_avatar_generation_keeps_variants(monkeypatch, client):
         f"/api/rooms/{rid}/npcs/{npc_id}/avatar", headers=headers
     )
     assert second.status_code == 200, second.text
+    assert second.json()["appearance_tags"] == "black nun habit, white headdress"
     assert [v["url"] for v in second.json()["avatar_variants"]] == [
         "/media/generated/npc-b.png",
         "/media/generated/npc-a.png",
     ]
+    assert all(v["appearance_tags"] for v in second.json()["avatar_variants"])
 
     selected = await client.put(
         f"/api/rooms/{rid}/npcs/{npc_id}/avatar/current",
@@ -214,6 +308,7 @@ async def test_npc_avatar_generation_keeps_variants(monkeypatch, client):
     )
     assert selected.status_code == 200, selected.text
     assert selected.json()["avatar_url"] == "/media/generated/npc-a.png"
+    assert seen_nsfw == [True, True]
 
 
 @pytest.mark.asyncio
@@ -233,7 +328,14 @@ async def test_player_evolve_merges_persona_and_appearance(monkeypatch, client):
     async def fake_generate_portrait(*_args, **_kwargs):
         return {"url": "/media/generated/evolved.png"}
 
-    monkeypatch.setattr(rooms_mod, "agent_provider", lambda _agent: EvolveBrain())
+    async def mock_agent_run(_task, **kw):
+        return {
+            "persona": "新人设：冷静但更自信的女骑士",
+            "appearance": "blonde hair, blue eyes, colored eyelashes, "
+            "confident smile, blush, closed mouth, silver armor, "
+            "three-quarter view, eyes toward viewer",
+        }
+    monkeypatch.setattr(rooms_mod.agent, "run", mock_agent_run)
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)
@@ -265,7 +367,11 @@ async def test_evolve_routes_accept_put_and_npc_needs_no_body(monkeypatch, clien
     async def fake_generate_portrait(*_args, **_kwargs):
         return {"url": "/media/generated/evolved-npc.png"}
 
-    monkeypatch.setattr(rooms_mod, "agent_provider", lambda _agent: TagBrain())
+    async def mock_tag_run(task, **kw):
+        if task == "character_design":
+            return {"persona": "mentor", "appearance": "short black hair"}
+        return "silver hair, green eyes, colored eyelashes, closed mouth"
+    monkeypatch.setattr(rooms_mod.agent, "run", mock_tag_run)
     monkeypatch.setattr(rooms_mod, "generate_portrait", fake_generate_portrait)
 
     token = await _register(client)

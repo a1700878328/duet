@@ -182,6 +182,7 @@ export function CardPanel({
   const [editing, setEditing] = useState<EditTarget>(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [regeneratingAllNpcAvatars, setRegeneratingAllNpcAvatars] = useState(false);
   const [genCount, setGenCount] = useState(4);
   const [genHint, setGenHint] = useState("");
   // Per-target avatar-generation in flight (key "me" or npc id), + active toggles.
@@ -265,6 +266,8 @@ export function CardPanel({
         character_name: draft.name,
         persona: draft.persona,
         appearance: draft.appearance || null,
+        appearance_tags:
+          myCard?.appearance === draft.appearance ? myCard.appearance_tags ?? null : null,
         voice_id: draft.voice_id || null,
       });
       setMyCardOverride(updated);
@@ -282,6 +285,7 @@ export function CardPanel({
       name: card.character_name,
       persona: card.persona ?? "",
       appearance: card.appearance ?? null,
+      appearance_tags: card.appearance_tags ?? null,
       voice_id: card.voice_id ?? null,
       voice_ref_url: card.voice_ref_url ?? null,
       voice_ref_text: card.voice_ref_text ?? null,
@@ -320,6 +324,7 @@ export function CardPanel({
         character_name: card.name,
         persona: card.persona,
         appearance: card.appearance ?? null,
+        appearance_tags: card.appearance_tags ?? null,
         voice_id: card.voice_id ?? null,
         voice_ref_url: card.voice_ref_url ?? null,
         voice_ref_text: card.voice_ref_text ?? null,
@@ -357,6 +362,10 @@ export function CardPanel({
         name: draft.name,
         persona: draft.persona,
         appearance: draft.appearance || null,
+        appearance_tags:
+          editing?.kind === "npc" && editing.npc.appearance === draft.appearance
+            ? editing.npc.appearance_tags ?? null
+            : null,
         voice_id: draft.voice_id || null,
       });
       setEditing(null);
@@ -498,6 +507,23 @@ export function CardPanel({
       fail(err, "生成头像失败");
     } finally {
       setBusy(setAvatarBusy, key, false);
+    }
+  }
+
+  async function regenerateAllNpcAvatars() {
+    const count = npcs.filter((npc) => npc.id !== 0 && npc.name !== "上帝").length;
+    if (count <= 0) return;
+    if (!window.confirm(`重新用新版 NTRMix 路线生成全部 ${count} 个 NPC 头像？`)) {
+      return;
+    }
+    setRegeneratingAllNpcAvatars(true);
+    try {
+      await api.regenerateAllNpcAvatars(roomId);
+      await refresh();
+    } catch (err) {
+      fail(err, "批量重生 NPC 头像失败");
+    } finally {
+      setRegeneratingAllNpcAvatars(false);
     }
   }
 
@@ -868,6 +894,20 @@ export function CardPanel({
           <section className="card-section">
             <div className="card-section-head">
               <h4>登场 NPC（{npcs.length}）</h4>
+              {MEDIA_GENERATION_ENABLED && npcs.some((npc) => npc.id !== 0 && npc.name !== "上帝") && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void regenerateAllNpcAvatars()}
+                  disabled={regeneratingAllNpcAvatars}
+                  title="用当前新版 NTRMix 角色卡路线重生全部 NPC 图片"
+                >
+                  {regeneratingAllNpcAvatars ? (
+                    <><span className="spinner spinner-dark" />重生中…</>
+                  ) : (
+                    "全NPC重生"
+                  )}
+                </button>
+              )}
             </div>
 
             {loaded && npcs.length === 0 && editing?.kind !== "new" && (

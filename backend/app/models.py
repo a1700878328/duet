@@ -66,7 +66,7 @@ class RoomMember(Base):
     character_name: Mapped[str] = mapped_column(String(128))
     # 外貌卡：自然语言外貌（发色/瞳色/服装…），生图时织入 prompt 保一致。None=不指定。
     appearance: Mapped[str | None] = mapped_column(
-        String(512), nullable=True, default=None
+        String(2000), nullable=True, default=None
     )
     # 英文 Danbooru tag 版 appearance（画图 AI 翻译结果，场景图/立绘直接使用）。
     appearance_tags: Mapped[str | None] = mapped_column(
@@ -112,7 +112,10 @@ class UserCharacterCard(Base):
     name: Mapped[str] = mapped_column(String(128))
     persona: Mapped[str] = mapped_column(Text, default="")
     appearance: Mapped[str | None] = mapped_column(
-        String(512), nullable=True, default=None
+        String(2000), nullable=True, default=None
+    )
+    appearance_tags: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
     voice_id: Mapped[str | None] = mapped_column(
         String(200), nullable=True, default=None
@@ -171,7 +174,7 @@ class NpcCard(Base):
     name: Mapped[str] = mapped_column(String(128))
     persona: Mapped[str] = mapped_column(Text, default="")
     appearance: Mapped[str | None] = mapped_column(
-        String(512), nullable=True, default=None
+        String(2000), nullable=True, default=None
     )
     appearance_tags: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None

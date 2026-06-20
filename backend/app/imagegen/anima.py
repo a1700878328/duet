@@ -40,11 +40,14 @@ import copy
 import hashlib
 import json
 import random
+import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import httpx
+from PIL import Image, ImageFilter
 
 from ..config import settings
 from . import media
@@ -105,7 +108,9 @@ DEFAULT_NEGATIVE = (
     "score_1, score_2, score_3, bad anatomy, bad proportions, deformed anatomy, "
     "deformed face, deformed eyes, bad hands, multiple fingers, missing fingers, "
     "extra fingers, fewer digits, cropped, worst quality, low quality, lowres, "
-    "jpeg artifacts, watermark, username, signature, sketch, text, speech bubble, "
+    "jpeg artifacts, watermark, username, signature, sketch, rough sketch, lineart only, "
+    "unfinished drawing, monochrome, grayscale, watercolor, rough brushwork, "
+    "concept art, muted colors, text, speech bubble, "
     "caption, photorealistic, realistic, conjoined, "
     "bad ai-generated, 3d render, cgi, semi-realistic, live action, western comic, "
     "oil painting, painterly, plastic skin, shiny clothes, shiny skin, gold skin, "
@@ -114,8 +119,9 @@ DEFAULT_NEGATIVE = (
 
 BAOBAO_QUALITY_CORE = (
     "best quality, score_9, score_8, score_7, highres, absurdres, 2D anime screenshot, "
-    "Japanese TV anime style, clean anime line art, polished cel shading, "
-    "flat anime coloring, crisp expressive eyes, official art"
+    "finished full-color anime illustration, Japanese visual novel CG, "
+    "sharp cel-shaded anime rendering, crisp clean anime outlines, glossy color shading, "
+    "rich saturated colors, vibrant 2D anime game CG, crisp expressive eyes, official art"
 )
 BAOBAO_QUALITY_PREFIX = f"{ANIMA_NTRMIX_TRIGGER}, {BAOBAO_QUALITY_CORE}"
 _DEFAULT_TEMPLATE_DIR = Path(
@@ -127,6 +133,13 @@ ANIMA_NTRMIX_FACE_STYLE_API_PROMPT = (
     else _DEFAULT_TEMPLATE_DIR
     / "FINAL_Anima_NTRMix_FaceStyle_Single_UltraTile1824.api-prompt.txt"
 )
+ANIMA_NTRMIX_IMG2IMG_API_PROMPT = (
+    _DEFAULT_TEMPLATE_DIR / "FINAL_Anima_GPT55_Img2Img_UltraTile1824.api-prompt.txt"
+)
+ANIMA_NTRMIX_INPAINT_API_PROMPT = (
+    _DEFAULT_TEMPLATE_DIR / "FINAL_Anima_NTRMix_Inpaint_LocalRedraw_UltraSharp1824.api-prompt.txt"
+)
+COMFY_INPUT_DIR = Path(r"C:\Users\a1700\Documents\ComfyUI\input")
 
 
 def _remove_ntrmix_trigger(text: str) -> str:
@@ -151,7 +164,7 @@ def _with_anima_style_prefix(positive: str, *, use_ntrmix: bool = True) -> str:
 
 
 def _load_api_prompt_template(path: Path) -> Graph:
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -219,6 +232,266 @@ def build_original_ntrmix_workflow(
         ):
             g.pop(node_id, None)
         g["169"]["inputs"]["images"] = ["165", 0]
+    return g
+
+
+def _copy_reference_to_comfy_input(reference_path: str | Path) -> str:
+    src = Path(reference_path)
+    if not src.exists() or not src.is_file():
+        raise FileNotFoundError(f"reference image not found: {src}")
+    COMFY_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    suffix = src.suffix.lower() if src.suffix else ".png"
+    name = f"duet_ref_{uuid.uuid4().hex}{suffix}"
+    dest = COMFY_INPUT_DIR / name
+    shutil.copy2(src, dest)
+    return name
+
+
+def _region_mask_to_comfy_input(
+    side: str, *, width: int = LANDSCAPE_WIDTH, height: int = LANDSCAPE_HEIGHT
+) -> str:
+    mask = Image.new("L", (width, height), 0)
+    if side == "left":
+        box = (0, 0, int(width * 0.50), height)
+    elif side == "right":
+        box = (int(width * 0.50), 0, width, height)
+    elif side == "top":
+        box = (0, 0, width, int(height * 0.50))
+    elif side == "bottom":
+        box = (0, int(height * 0.50), width, height)
+    else:
+        raise ValueError(f"unknown region side: {side}")
+    region = Image.new("L", (box[2] - box[0], box[3] - box[1]), 255)
+    mask.paste(region, box)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=12))
+    COMFY_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"duet_region_{side}_{uuid.uuid4().hex}.png"
+    mask.convert("RGB").save(COMFY_INPUT_DIR / name)
+    return name
+
+
+def build_anima_img2img_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_path: str | Path,
+    seed: int | None = None,
+    denoise: float = 0.36,
+    output_prefix: str = "DUET_ANIMA_IMG2IMG_IDENTITY",
+) -> Graph:
+    """Patch the tested Active_Strong Anima/NTRMix img2img API prompt.
+
+    This route keeps an existing character image as the visual identity anchor
+    while allowing the prompt to polish pose, outfit, background, and style.
+    """
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    g = copy.deepcopy(_load_api_prompt_template(ANIMA_NTRMIX_IMG2IMG_API_PROMPT))
+    g["200"]["inputs"]["image"] = _copy_reference_to_comfy_input(reference_path)
+    g["54"]["inputs"]["text"] = _remove_ntrmix_trigger(positive)
+    if negative:
+        g["62"]["inputs"]["text"] = f"{g['62']['inputs']['text']}, {negative}"
+    g["57"]["inputs"]["seed"] = seed
+    g["57"]["inputs"]["denoise"] = max(0.1, min(float(denoise), 0.8))
+    g["134"]["inputs"]["seed"] = seed + 1000000
+    g["169"]["inputs"]["filename_prefix"] = f"{output_prefix}_REFINED"
+    g["180"]["inputs"]["filename_prefix"] = f"{output_prefix}_ULTRASHARP_PRE"
+    return g
+
+
+def build_anima_ipadapter_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_path: str | Path,
+    width: int = LANDSCAPE_WIDTH,
+    height: int = LANDSCAPE_HEIGHT,
+    seed: int | None = None,
+    weight: float = 0.5,
+    upscale: bool = False,
+    tile_refine: bool = False,
+    output_prefix: str = "DUET_ANIMA_IPADAPTER_SCENE",
+) -> Graph:
+    """Anima/NTRMix txt2img with a visual reference through explicit IPAdapter.
+
+    Uses explicit IPAdapterModelLoader + CLIPVisionLoader because the unified
+    loader can fail to discover ClipVision on this Windows install.
+    """
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    g = build_baobao_anima_workflow(
+        positive,
+        negative,
+        width=width,
+        height=height,
+        seed=seed,
+        use_ntrmix=True,
+        upscale=upscale,
+        tile_refine=tile_refine,
+        output_prefix=output_prefix,
+    )
+    ref_name = _copy_reference_to_comfy_input(reference_path)
+    g["300"] = {"class_type": "LoadImage", "inputs": {"image": ref_name}}
+    g["301"] = {
+        "class_type": "CLIPVisionLoader",
+        "inputs": {"clip_name": "clip_vision_h.safetensors"},
+    }
+    g["302"] = {
+        "class_type": "IPAdapterModelLoader",
+        "inputs": {"ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors"},
+    }
+    g["303"] = {
+        "class_type": "IPAdapterAdvanced",
+        "inputs": {
+            "model": ["3", 0],
+            "ipadapter": ["302", 0],
+            "image": ["300", 0],
+            "clip_vision": ["301", 0],
+            "weight": max(0.0, min(float(weight), 1.5)),
+            "weight_type": "composition precise",
+            "combine_embeds": "average",
+            "start_at": 0.0,
+            "end_at": 0.65,
+            "embeds_scaling": "V only",
+        },
+    }
+    g["57"]["inputs"]["model"] = ["303", 0]
+    return g
+
+
+def build_anima_regional_ipadapter_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_paths: list[str | Path],
+    width: int = LANDSCAPE_WIDTH,
+    height: int = LANDSCAPE_HEIGHT,
+    seed: int | None = None,
+    weight: float = 0.72,
+    swap_refs: bool = False,
+    region_layout: str = "horizontal",
+    output_prefix: str = "DUET_ANIMA_REGIONAL_IPADAPTER_SCENE",
+) -> Graph:
+    """Anima/NTRMix scene with separate left/right IPAdapter identity masks."""
+    if len(reference_paths) < 2:
+        return build_anima_ipadapter_workflow(
+            positive,
+            negative,
+            reference_path=reference_paths[0],
+            width=width,
+            height=height,
+            seed=seed,
+            weight=0.5,
+            output_prefix=output_prefix,
+        )
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    g = build_baobao_anima_workflow(
+        positive,
+        negative,
+        width=width,
+        height=height,
+        seed=seed,
+        use_ntrmix=True,
+        upscale=False,
+        tile_refine=False,
+        output_prefix=output_prefix,
+    )
+    # IPAdapterAdvanced's regional attention mask can behave inverted depending
+    # on the active mask geometry. With the current non-overlapping left/right
+    # half masks, direct public order is the verified route; keep swap_refs
+    # explicit so alternate mask geometry remains testable.
+    ordered_refs = (
+        [reference_paths[1], reference_paths[0]] if swap_refs else reference_paths
+    )
+    left_ref = _copy_reference_to_comfy_input(ordered_refs[0])
+    right_ref = _copy_reference_to_comfy_input(ordered_refs[1])
+    first_side, second_side = (
+        ("top", "bottom") if region_layout == "vertical" else ("left", "right")
+    )
+    left_mask = _region_mask_to_comfy_input(first_side, width=width, height=height)
+    right_mask = _region_mask_to_comfy_input(second_side, width=width, height=height)
+    g["300"] = {"class_type": "LoadImage", "inputs": {"image": left_ref}}
+    g["301"] = {"class_type": "LoadImage", "inputs": {"image": right_ref}}
+    g["302"] = {"class_type": "LoadImage", "inputs": {"image": left_mask}}
+    g["303"] = {"class_type": "LoadImage", "inputs": {"image": right_mask}}
+    g["304"] = {
+        "class_type": "ImageToMask",
+        "inputs": {"image": ["302", 0], "channel": "red"},
+    }
+    g["305"] = {
+        "class_type": "ImageToMask",
+        "inputs": {"image": ["303", 0], "channel": "red"},
+    }
+    g["306"] = {
+        "class_type": "CLIPVisionLoader",
+        "inputs": {"clip_name": "clip_vision_h.safetensors"},
+    }
+    g["307"] = {
+        "class_type": "IPAdapterModelLoader",
+        "inputs": {"ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors"},
+    }
+    g["308"] = {
+        "class_type": "IPAdapterAdvanced",
+        "inputs": {
+            "model": ["3", 0],
+            "ipadapter": ["307", 0],
+            "image": ["300", 0],
+            "image_negative": ["301", 0],
+            "attn_mask": ["304", 0],
+            "clip_vision": ["306", 0],
+            "weight": max(0.0, min(float(weight), 1.5)),
+            "weight_type": "composition precise",
+            "combine_embeds": "average",
+            "start_at": 0.0,
+            "end_at": 0.72,
+            "embeds_scaling": "V only",
+        },
+    }
+    g["309"] = {
+        "class_type": "IPAdapterAdvanced",
+        "inputs": {
+            "model": ["308", 0],
+            "ipadapter": ["307", 0],
+            "image": ["301", 0],
+            "image_negative": ["300", 0],
+            "attn_mask": ["305", 0],
+            "clip_vision": ["306", 0],
+            "weight": max(0.0, min(float(weight), 1.5)),
+            "weight_type": "composition precise",
+            "combine_embeds": "average",
+            "start_at": 0.0,
+            "end_at": 0.72,
+            "embeds_scaling": "V only",
+        },
+    }
+    g["57"]["inputs"]["model"] = ["309", 0]
+    return g
+
+
+def build_anima_inpaint_workflow(
+    positive: str,
+    negative: str = "",
+    *,
+    source_path: str | Path,
+    mask_path: str | Path,
+    seed: int | None = None,
+    denoise: float = 0.42,
+    output_prefix: str = "DUET_ANIMA_INPAINT_FIX",
+) -> Graph:
+    """Patch the tested Active_Strong Anima/NTRMix local redraw workflow."""
+    if seed is None:
+        seed = random.randint(1, 2**32 - 1)
+    g = copy.deepcopy(_load_api_prompt_template(ANIMA_NTRMIX_INPAINT_API_PROMPT))
+    g["200"]["inputs"]["image"] = _copy_reference_to_comfy_input(source_path)
+    g["210"]["inputs"]["image"] = _copy_reference_to_comfy_input(mask_path)
+    g["54"]["inputs"]["text"] = _remove_ntrmix_trigger(positive)
+    if negative:
+        g["62"]["inputs"]["text"] = f"{g['62']['inputs']['text']}, {negative}"
+    g["57"]["inputs"]["seed"] = seed
+    g["57"]["inputs"]["denoise"] = max(0.1, min(float(denoise), 0.8))
+    g["168"]["inputs"]["filename_prefix"] = f"{output_prefix}_LOCAL"
+    g["169"]["inputs"]["filename_prefix"] = f"{output_prefix}_REFINED"
     return g
 
 
@@ -847,6 +1120,170 @@ async def generate_anima(
             tile_refine=tile_refine,
         )
     except Exception as e:  # build is pure, but never raise out of the entrypoint
+        return {"error": f"构图失败: {e}"}
+
+    result = await _submit_and_fetch(workflow)
+    if result.get("error"):
+        return {"error": result["error"], "prompt_id": result.get("prompt_id")}
+
+    image_bytes = result.get("bytes")
+    if not image_bytes:
+        return {"error": "成功但无图片字节"}
+
+    name, path = save_png(image_bytes)
+    return {
+        "url": f"{MEDIA_URL_PREFIX}/{name}",
+        "path": str(path),
+        "filename": name,
+        "prompt_id": result.get("prompt_id"),
+    }
+
+
+async def generate_anima_img2img(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_path: str | Path,
+    seed: int | None = None,
+    denoise: float = 0.36,
+) -> dict[str, Any]:
+    """Generate one Anima/NTRMix image using an existing image as identity anchor."""
+    try:
+        workflow = build_anima_img2img_workflow(
+            positive,
+            negative,
+            reference_path=reference_path,
+            seed=seed,
+            denoise=denoise,
+        )
+    except Exception as e:
+        return {"error": f"构图失败: {e}"}
+
+    result = await _submit_and_fetch(workflow)
+    if result.get("error"):
+        return {"error": result["error"], "prompt_id": result.get("prompt_id")}
+
+    image_bytes = result.get("bytes")
+    if not image_bytes:
+        return {"error": "成功但无图片字节"}
+
+    name, path = save_png(image_bytes)
+    return {
+        "url": f"{MEDIA_URL_PREFIX}/{name}",
+        "path": str(path),
+        "filename": name,
+        "prompt_id": result.get("prompt_id"),
+    }
+
+
+async def generate_anima_ipadapter_scene(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_path: str | Path,
+    seed: int | None = None,
+    weight: float = 0.5,
+    width: int = LANDSCAPE_WIDTH,
+    height: int = LANDSCAPE_HEIGHT,
+    upscale: bool = False,
+    tile_refine: bool = False,
+    output_prefix: str = "DUET_ANIMA_IPADAPTER_SCENE",
+) -> dict[str, Any]:
+    """Generate a coherent scene while conditioning on character reference art."""
+    try:
+        workflow = build_anima_ipadapter_workflow(
+            positive,
+            negative,
+            reference_path=reference_path,
+            width=width,
+            height=height,
+            seed=seed,
+            weight=weight,
+            upscale=upscale,
+            tile_refine=tile_refine,
+            output_prefix=output_prefix,
+        )
+    except Exception as e:
+        return {"error": f"构图失败: {e}"}
+
+    result = await _submit_and_fetch(workflow)
+    if result.get("error"):
+        return {"error": result["error"], "prompt_id": result.get("prompt_id")}
+
+    image_bytes = result.get("bytes")
+    if not image_bytes:
+        return {"error": "成功但无图片字节"}
+
+    name, path = save_png(image_bytes)
+    return {
+        "url": f"{MEDIA_URL_PREFIX}/{name}",
+        "path": str(path),
+        "filename": name,
+        "prompt_id": result.get("prompt_id"),
+    }
+
+
+async def generate_anima_regional_ipadapter_scene(
+    positive: str,
+    negative: str = "",
+    *,
+    reference_paths: list[str | Path],
+    seed: int | None = None,
+    weight: float = 0.72,
+    swap_refs: bool = False,
+    region_layout: str = "horizontal",
+) -> dict[str, Any]:
+    """Generate a scene with separate left/right reference identity anchors."""
+    try:
+        workflow = build_anima_regional_ipadapter_workflow(
+            positive,
+            negative,
+            reference_paths=reference_paths,
+            seed=seed,
+            weight=weight,
+            swap_refs=swap_refs,
+            region_layout=region_layout,
+        )
+    except Exception as e:
+        return {"error": f"构图失败: {e}"}
+
+    result = await _submit_and_fetch(workflow)
+    if result.get("error"):
+        return {"error": result["error"], "prompt_id": result.get("prompt_id")}
+
+    image_bytes = result.get("bytes")
+    if not image_bytes:
+        return {"error": "成功但无图片字节"}
+
+    name, path = save_png(image_bytes)
+    return {
+        "url": f"{MEDIA_URL_PREFIX}/{name}",
+        "path": str(path),
+        "filename": name,
+        "prompt_id": result.get("prompt_id"),
+    }
+
+
+async def generate_anima_inpaint(
+    positive: str,
+    negative: str = "",
+    *,
+    source_path: str | Path,
+    mask_path: str | Path,
+    seed: int | None = None,
+    denoise: float = 0.42,
+) -> dict[str, Any]:
+    """Locally redraw a masked region with the tested Anima/NTRMix inpaint route."""
+    try:
+        workflow = build_anima_inpaint_workflow(
+            positive,
+            negative,
+            source_path=source_path,
+            mask_path=mask_path,
+            seed=seed,
+            denoise=denoise,
+        )
+    except Exception as e:
         return {"error": f"构图失败: {e}"}
 
     result = await _submit_and_fetch(workflow)

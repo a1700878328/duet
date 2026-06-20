@@ -146,6 +146,9 @@ export function RoomsPage() {
         <h2>公开房间</h2>
         <div className="row">
           <span className="muted">{user?.display_name}</span>
+          <button className="btn btn-ghost" onClick={() => navigate("/agents")}>
+            Agents
+          </button>
           <button className="btn btn-ghost" onClick={logout}>
             退出
           </button>
@@ -177,7 +180,7 @@ export function RoomsPage() {
           </button>
         </form>
         <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-          进入房间后会让你选角色（AI 生成立绘任你挑，或自己描述）。世界卡＝这场戏的背景设定。
+          进入房间后会让你选角色（AI 生成参考图任你挑，或自己描述）。世界卡＝这场戏的背景设定。
         </p>
       </div>
 

@@ -29,6 +29,8 @@ export interface AvatarVariant {
   label?: string | null;
   source?: string | null;
   created_at?: string | null;
+  appearance?: string | null;
+  appearance_tags?: string | null;
 }
 
 export interface VoiceVariant {
@@ -127,6 +129,7 @@ export interface MemberCard {
   display_name: string;
   character_name: string;
   appearance: string | null;
+  appearance_tags?: string | null;
   persona: string | null;
   voice_id: string | null;
   voice_ref_url?: string | null;
@@ -143,6 +146,7 @@ export interface NpcCard {
   name: string;
   persona: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
@@ -165,6 +169,7 @@ export interface CharDraft {
   name: string;
   persona: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
@@ -178,6 +183,7 @@ export interface UserCharacterCard {
   name: string;
   persona: string;
   appearance?: string | null;
+  appearance_tags?: string | null;
   voice_id?: string | null;
   voice_ref_url?: string | null;
   voice_ref_text?: string | null;
@@ -187,6 +193,38 @@ export interface UserCharacterCard {
   source_world_card?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentTask {
+  name: string;
+  system_prompt: string;
+  default_system_prompt: string;
+  tutorial_name: string;
+  default_tutorial_name: string;
+  tutorial_chars: number;
+  jailbreak: boolean;
+  default_jailbreak: boolean;
+  temperature: number;
+  default_temperature: number;
+  max_tokens: number;
+  default_max_tokens: number;
+  timeout: number;
+  default_timeout: number;
+  extra_body: Record<string, unknown>;
+  default_extra_body: Record<string, unknown>;
+  output_schema: string;
+  overridden: boolean;
+  overrides: string[];
+}
+
+export interface AgentTaskUpdate {
+  system_prompt?: string;
+  tutorial_name?: string;
+  jailbreak?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+  timeout?: number;
+  extra_body?: Record<string, unknown>;
 }
 
 export type AiMode = "manual" | "auto";
@@ -385,7 +423,14 @@ export type WsClientEvent =
   | { type: "describe_scene" }
   | { type: "god_whisper"; content: string; target_npcs?: string[]; scene?: string; action?: string }
   | { type: "pay_npc"; npc_id: number; amount: number }
-  | { type: "image"; custom_prompt?: string; characters?: string[]; designed_appearance?: string }
+  | {
+      type: "image";
+      custom_prompt?: string;
+      characters?: string[];
+      designed_appearance?: string;
+      nsfw?: boolean;
+      quality?: "fast" | "refined";
+    }
   | { type: "typing"; is_typing: boolean }
   | { type: "move"; scene: string; npcs: string[] };
 

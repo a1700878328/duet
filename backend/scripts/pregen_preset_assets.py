@@ -104,6 +104,7 @@ async def _generate_card(
     appearance_prefix: str | None,
     appearance_suffix: str | None,
     persona_override: str | None,
+    nsfw_image: bool,
 ) -> None:
     name = str(card.get("name") or "").strip()
     if not name:
@@ -130,8 +131,9 @@ async def _generate_card(
             appearance or name or "1person",
             name=name,
             persona=persona,
-            nsfw=world == "ksim",
+            nsfw=nsfw_image,
             seed=char_seed(0, f"{world}:{kind}:{name}"),
+            mode="reference",
         )
         if result.get("url"):
             if candidate_only:
@@ -191,6 +193,11 @@ async def main() -> None:
     parser.add_argument("--appearance-prefix", default=None)
     parser.add_argument("--appearance-suffix", default=None)
     parser.add_argument("--persona-override", default=None)
+    parser.add_argument(
+        "--nsfw-image",
+        action="store_true",
+        help="Generate preset default images with NSFW portrait prompting. Defaults to SFW.",
+    )
     args = parser.parse_args()
 
     names = {str(n).strip() for n in args.name if str(n).strip()} or None
@@ -216,6 +223,7 @@ async def main() -> None:
             appearance_prefix=args.appearance_prefix,
             appearance_suffix=args.appearance_suffix,
             persona_override=args.persona_override,
+            nsfw_image=args.nsfw_image,
         )
 
     print("\nDone.")

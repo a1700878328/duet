@@ -17,6 +17,7 @@ import {
   type ProfileView,
 } from "../components/RoomOverlays";
 import { StatsPanel } from "../components/StatsPanel";
+import { WorldStatusPanel } from "../components/WorldStatusPanel";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { MEDIA_GENERATION_ENABLED, VOICE_GENERATION_ENABLED } from "../lib/features";
@@ -73,6 +74,7 @@ export function RoomPage() {
   const [polishingSay, setPolishingSay] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [worldOpen, setWorldOpen] = useState(false);
   // 叙事时间：世界进度 / 日内节点。
   const [timeLabel, setTimeLabel] = useState("冒险第1周·第1天·清晨");
   // 当前场景标签（""=自由世界无分区）。
@@ -122,6 +124,8 @@ export function RoomPage() {
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageText, setImageText] = useState("");
   const [imageChars, setImageChars] = useState<Set<string>>(new Set());
+  const [imageNsfw, setImageNsfw] = useState(true);
+  const [imageQuality, setImageQuality] = useState<"fast" | "refined">("fast");
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [moveScene, setMoveScene] = useState("");
   const [selectedMoveNpcs, setSelectedMoveNpcs] = useState<Set<string>>(new Set());
@@ -211,7 +215,7 @@ export function RoomPage() {
     onTime: handleTime,
     onScene: handleScene,
     onSceneLogsChanged: () => {
-      if (sceneLogOpen) void refreshSceneLog();
+      if (sceneLogOpen || worldOpen) void refreshSceneLog();
     },
     onSayDraft: (content) => {
       setPolishingSay(false);
@@ -603,7 +607,10 @@ export function RoomPage() {
             onClick={() => {
               setPanelOpen((v) => {
                 const next = !v;
-                if (next) setStatsOpen(false);
+                if (next) {
+                  setStatsOpen(false);
+                  setWorldOpen(false);
+                }
                 return next;
               });
             }}
@@ -617,7 +624,10 @@ export function RoomPage() {
             onClick={() => {
               setStatsOpen((v) => {
                 const next = !v;
-                if (next) setPanelOpen(false);
+                if (next) {
+                  setPanelOpen(false);
+                  setWorldOpen(false);
+                }
                 return next;
               });
             }}
@@ -625,6 +635,24 @@ export function RoomPage() {
             title="我的角色状态（女骑士模拟器式数值表）"
           >
             📊 状态
+          </button>
+          <button
+            className={`btn btn-ghost cards-toggle ${worldOpen ? "active" : ""}`}
+            onClick={() => {
+              setWorldOpen((v) => {
+                const next = !v;
+                if (next) {
+                  setPanelOpen(false);
+                  setStatsOpen(false);
+                  void refreshSceneLog();
+                }
+                return next;
+              });
+            }}
+            aria-pressed={worldOpen}
+            title="世界状态、NPC 分布、后台动向与结局风险"
+          >
+            🌐 世界
           </button>
         </div>
 
@@ -769,6 +797,23 @@ export function RoomPage() {
         onClose={() => setStatsOpen(false)}
         stats={myStats}
         characterName={myCard?.character_name}
+      />
+
+      <WorldStatusPanel
+        open={worldOpen}
+        onClose={() => setWorldOpen(false)}
+        cards={cards}
+        sceneLog={sceneLog}
+        currentScene={scene}
+        timeLabel={timeLabel}
+        myStats={myStats}
+        characterName={myCard?.character_name}
+        loading={sceneLogLoading}
+        onRefresh={() => {
+          void refreshCards();
+          void refreshRoom();
+          void refreshSceneLog();
+        }}
       />
 
       {sceneLogOpen && (
@@ -945,12 +990,50 @@ export function RoomPage() {
                   </label>
                 ))}
             </div>
+            <div className="image-toggle-group" aria-label="场景图设置">
+              <label
+                className={`image-soft-toggle ${imageNsfw ? "active" : ""}`}
+                title="关闭时强制按普通场景生成"
+              >
+                <input
+                  type="checkbox"
+                  checked={imageNsfw}
+                  onChange={(e) => setImageNsfw(e.target.checked)}
+                />
+                <span className="image-soft-switch" aria-hidden="true" />
+                <span>特殊</span>
+              </label>
+              <div className="image-quality-tabs" role="group" aria-label="生成质量">
+                <button
+                  type="button"
+                  className={imageQuality === "fast" ? "active" : ""}
+                  onClick={() => setImageQuality("fast")}
+                  title="关超分和局部修补，优先看构图"
+                >
+                  快速预览
+                </button>
+                <button
+                  type="button"
+                  className={imageQuality === "refined" ? "active" : ""}
+                  onClick={() => setImageQuality("refined")}
+                  title="开启超分和精修，耗时更久"
+                >
+                  精修出图
+                </button>
+              </div>
+            </div>
             <div className="move-actions">
               <button
                 className="btn"
                 disabled={imaging || (!imageText.trim() && imageChars.size === 0)}
                 onClick={() => {
-                  requestImage(imageText.trim(), [...imageChars]);
+                  requestImage(
+                    imageText.trim(),
+                    [...imageChars],
+                    undefined,
+                    imageNsfw,
+                    imageQuality,
+                  );
                   setImageText("");
                   setImageChars(new Set());
                   setImageModalOpen(false);

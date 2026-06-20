@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(backend/**)",
+      "Write(frontend/**)",
+      "Write(CLAUDE.md)",
+      "Write(package.json)",
+      "Write(package-lock.json)",
+      "Write(pyproject.toml)",
+      "Write(uv.lock)",
+      "Bash(python c:/tmp/**)",
+      "Bash(python C:/tmp/**)",
+      "Bash(python C:\\tmp\\**)",
+      "Bash(py c:/tmp/**)",
+      "Bash(py C:/tmp/**)",
+      "Bash(py C:\\tmp\\**)"
+    ]
+  }
+}

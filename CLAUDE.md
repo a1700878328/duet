@@ -10,6 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Read this before making changes. These rules are here because a stale Claude plan once overwrote newer Codex work.
 
+- Project permissions intentionally deny `Write(...)` on source/config files under `backend/`, `frontend/`, and key root manifests. Use `Edit`/`MultiEdit` with narrow anchors for existing code. If a new source file is genuinely needed, explain the file and ask the user to relax the guard for that specific path.
+- Do not generate temporary Python/PowerShell/Node scripts whose purpose is to rewrite project source files. Make changes directly through narrow file edits so the diff is reviewable.
+- Before editing a file, re-read the current file from disk and preserve unrelated worktree changes. Never reconstruct a file from memory, old transcripts, or `.claude/plans`.
 - Treat the current worktree and tests as source of truth. Do not restore behavior from `.claude/plans`, older chat summaries, old specs, or checkpoint memory without first verifying it in the current code.
 - Historical docs under `docs/superpowers/specs/` are design context, not current UI requirements. If they conflict with current code/tests, update the docs or ask, but do not reintroduce removed controls.
 - Do not re-add a global `R18` button, a global `让 AI 接话` button, a global `推进时间` button, or an NPC auto-play voice toggle. Current flow is per-NPC action, private God whisper, scene/time systems, manual TTS preview.

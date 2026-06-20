@@ -39,6 +39,8 @@ class AvatarVariantOut(BaseModel):
     label: str | None = Field(default=None, max_length=64)
     source: str | None = Field(default=None, max_length=32)
     created_at: str | None = Field(default=None, max_length=40)
+    appearance: str | None = Field(default=None, max_length=2000)
+    appearance_tags: str | None = None
 
 
 class AvatarSelectIn(BaseModel):
@@ -95,18 +97,19 @@ class RoomCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     character_name: str = Field(min_length=1, max_length=128)
     world_card: str | None = Field(default=None, max_length=32)
-    appearance: str | None = Field(default=None, max_length=512)
+    appearance: str | None = Field(default=None, max_length=2000)
 
 
 class RoomJoinIn(BaseModel):
     character_name: str = Field(min_length=1, max_length=128)
-    appearance: str | None = Field(default=None, max_length=512)
+    appearance: str | None = Field(default=None, max_length=2000)
 
 
 class MeCardUpdateIn(BaseModel):
     character_name: str | None = Field(default=None, max_length=128)
     persona: str | None = Field(default=None, max_length=4000)
-    appearance: str | None = Field(default=None, max_length=512)
+    appearance: str | None = Field(default=None, max_length=2000)
+    appearance_tags: str | None = None
     voice_id: str | None = Field(default=None, max_length=200)
     avatar_url: str | None = Field(default=None, max_length=256)
     voice_ref_url: str | None = Field(default=None, max_length=256)
@@ -119,7 +122,8 @@ class MeCardUpdateIn(BaseModel):
 class UserCharacterCardIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     persona: str = Field(default="", max_length=4000)
-    appearance: str | None = Field(default=None, max_length=512)
+    appearance: str | None = Field(default=None, max_length=2000)
+    appearance_tags: str | None = None
     voice_id: str | None = Field(default=None, max_length=200)
     voice_ref_url: str | None = Field(default=None, max_length=256)
     voice_ref_text: str | None = Field(default=None, max_length=1000)
@@ -151,7 +155,7 @@ class UserCharacterCardOut(BaseModel):
 class NpcCardIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     persona: str = Field(default="", max_length=4000)
-    appearance: str | None = Field(default=None, max_length=512)
+    appearance: str | None = Field(default=None, max_length=2000)
     appearance_tags: str | None = None
     voice_id: str | None = Field(default=None, max_length=200)
 
@@ -208,6 +212,7 @@ class SceneDesignOut(BaseModel):
 class CharOptionsIn(BaseModel):
     count: int = Field(default=3, ge=1, le=4)
     hint: str | None = Field(default=None, max_length=500)
+    nsfw: bool = False
 
 
 class CharDraftOut(BaseModel):
@@ -216,6 +221,7 @@ class CharDraftOut(BaseModel):
     name: str
     persona: str
     appearance: str | None = None
+    appearance_tags: str | None = None
     voice_id: str | None = None
     voice_ref_url: str | None = Field(default=None, max_length=256)
     voice_ref_text: str | None = Field(default=None, max_length=1000)
@@ -234,6 +240,38 @@ class TtsIn(BaseModel):
 
 class TtsOut(BaseModel):
     url: str
+
+
+class AgentTaskOut(BaseModel):
+    name: str
+    system_prompt: str
+    default_system_prompt: str
+    tutorial_name: str = ""
+    default_tutorial_name: str = ""
+    tutorial_chars: int = 0
+    jailbreak: bool = False
+    default_jailbreak: bool = False
+    temperature: float
+    default_temperature: float
+    max_tokens: int
+    default_max_tokens: int
+    timeout: float
+    default_timeout: float
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    default_extra_body: dict[str, Any] = Field(default_factory=dict)
+    output_schema: str
+    overridden: bool = False
+    overrides: list[str] = Field(default_factory=list)
+
+
+class AgentTaskUpdateIn(BaseModel):
+    system_prompt: str | None = Field(default=None, max_length=50000)
+    tutorial_name: str | None = Field(default=None, max_length=64)
+    jailbreak: bool | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1, le=20000)
+    timeout: float | None = Field(default=None, ge=1, le=600)
+    extra_body: dict[str, Any] | None = None
 
 
 class CardsOut(BaseModel):

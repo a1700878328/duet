@@ -42,7 +42,13 @@ interface UseRoomSocketResult {
   advance: (npcId?: number) => void;
   timeskip: () => void;
   describeScene: () => void;
-  requestImage: (customPrompt?: string, characters?: string[], designedAppearance?: string) => void;
+  requestImage: (
+    customPrompt?: string,
+    characters?: string[],
+    designedAppearance?: string,
+    nsfw?: boolean,
+    quality?: "fast" | "refined",
+  ) => void;
   moveNpcs: (scene: string, npcs: string[]) => void;
   godWhisper: (params: { content?: string; target_npc?: string; scene?: string; action?: string }) => void;
   gotoScene: (scene: string) => void;
@@ -325,12 +331,20 @@ export function useRoomSocket({
   }, [send]);
 
   const requestImage = useCallback(
-    (customPrompt?: string, characters?: string[], designedAppearance?: string) => {
+    (
+      customPrompt?: string,
+      characters?: string[],
+      designedAppearance?: string,
+      nsfw?: boolean,
+      quality?: "fast" | "refined",
+    ) => {
       setImaging(true);
       const msg: Record<string, unknown> = { type: "image" };
       if (customPrompt) msg.custom_prompt = customPrompt;
       if (characters && characters.length > 0) msg.characters = characters;
       if (designedAppearance) msg.designed_appearance = designedAppearance;
+      if (nsfw !== undefined) msg.nsfw = nsfw;
+      if (quality) msg.quality = quality;
       send(msg as WsClientEvent);
     },
     [send],

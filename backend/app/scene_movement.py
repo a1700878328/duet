@@ -207,7 +207,7 @@ def _parse_introduce_npcs(
         }
         appearance = str(item.get("appearance") or item.get("外貌") or "").strip()
         if appearance:
-            draft["appearance"] = appearance[:512]
+            draft["appearance"] = appearance[:2000]
         voice_id = str(item.get("voice_id") or item.get("声音") or "").strip()
         if voice_id:
             draft["voice_id"] = voice_id[:200]

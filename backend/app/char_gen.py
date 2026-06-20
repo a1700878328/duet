@@ -7,7 +7,7 @@ PLAYER 角色草稿（含英文视觉tag外貌描述 + 中文声音设计），�
 
 from typing import Any
 
-from .brain import BrainProvider
+from .agent_sdk import agent
 from .json_utils import parse_json_array as _parse_json_array
 
 _WORLDS = {
@@ -19,47 +19,65 @@ _WORLDS = {
 def _clean_drafts(raw: str, count: int) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for d in _parse_json_array(raw)[:count]:
-        if isinstance(d, dict) and d.get("name"):
-            out.append(
-                {
-                    "name": str(d["name"])[:128],
-                    "persona": str(d.get("persona", ""))[:4000],
-                    "appearance": str(d["appearance"])[:512]
-                    if d.get("appearance")
-                    else None,
-                    "voice_id": str(d["voice_id"])[:200] if d.get("voice_id") else None,
-                }
-            )
+        cleaned = _clean_draft(d)
+        if cleaned:
+            out.append(cleaned)
     return out
+
+
+def _clean_draft(d: Any) -> dict[str, Any]:
+    if not isinstance(d, dict) or not d.get("name"):
+        return {}
+    return {
+        "name": str(d["name"])[:128],
+        "persona": str(d.get("persona", ""))[:4000],
+        "appearance": str(d["appearance"])[:2000] if d.get("appearance") else None,
+        "voice_id": str(d["voice_id"])[:200] if d.get("voice_id") else None,
+    }
 
 
 async def generate_character_options(
     world_card: str | None,
     hint: str | None,
     count: int,
-    brain: BrainProvider | None = None,
+    *,
+    nsfw: bool = False,
 ) -> list[dict[str, Any]]:
     """生成 count 个玩家角色草稿 dict（name/persona/appearance/voice_id）。
 
-    使用教程注入设计师确保 appearance 严格对齐 NTRMix 格式。
+    All AI work goes through AgentSDK so prompt/task/schema behavior has one
+    source of truth.
     """
-    from .imagegen.tutorial_designer import design_character
-
     world_label = _WORLDS.get(world_card or "", world_card or "")
     results: list[dict[str, Any]] = []
     for i in range(count):
         desc = hint or f"风格各异的玩家角色，第{i+1}个"
         if i > 0 and hint:
             desc = (
-                f"{hint}（变体{i+1}：必须保留玩家原始描述里的职业、服装、"
-                "道具和所有视觉细节；只在姓名、性格、背景经历、表情气质或"
-                "非核心小装饰上做差异）"
+                f"{hint}（这是同一个角色的第{i+1}个诠释版本，必须保留玩家原始描述里的"
+                "职业、服装、道具和所有视觉细节，完全一致；"
+                "只在姓名、发型细节、表情气质、服装配色或氛围上做微小变化——"
+                "像是同一个角色的不同插画师诠释）"
             )
         elif i > 0:
             desc = f"风格与前面不同的玩家角色，第{i+1}个"
-        draft = await design_character(
-            desc, world_card=world_label, brain=brain
+        user = (
+            f"NSFW：{'true' if nsfw else 'false'}\n"
+            f"玩家描述：{desc}\n"
+            "硬性要求：角色卡和外貌必须贴合玩家描述，不得改职业、发色、瞳色、"
+            "服装、道具、种族、体型或核心气质。persona 写 4-7 句；appearance 写 250-700 字，"
+            "必须有足够视觉细节供后续画图 AI 锁定角色。"
         )
+        if not nsfw:
+            user += (
+                " NSFW=false 时必须服装完整，不得裸露胸部/生殖器，不得写裸体、"
+                "全裸、无遮蔽、性行为、被绑裸体或纯成人特写。"
+            )
+        if world_label:
+            user = f"世界设定：{world_label}\n{user}"
+        draft = await agent.run("character_design", input=user)
         if draft.get("name"):
-            results.append(draft)
+            cleaned = _clean_draft(draft)
+            if cleaned:
+                results.append(cleaned)
     return results
