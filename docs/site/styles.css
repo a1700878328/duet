@@ -238,13 +238,19 @@ img {
 }
 
 .screens figure:first-child,
-.screens figure:nth-child(3) {
+.screens figure:nth-child(3),
+.screens .screen-wide {
   grid-column: span 2;
 }
 
 .screens img {
   aspect-ratio: 16 / 9;
   object-fit: cover;
+}
+
+.screens .screen-wide img {
+  object-fit: contain;
+  background: #05030b;
 }
 
 .screens figcaption {
