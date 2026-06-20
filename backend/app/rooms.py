@@ -33,6 +33,8 @@ from .imagegen.anima import (
     generate_anima_ipadapter_scene,
 )
 from .imagegen.portrait import build_portrait_prompt, generate_portrait
+from .i18n import locale_ai_mode, room_locale
+from .i18n import normalize_locale
 from .models import Message, NpcCard, Room, RoomMember, User, UserCharacterCard
 from .npc_gen import generate_npcs
 from .preset_assets import apply_preset_assets
@@ -784,10 +786,14 @@ async def list_rooms(user: CurrentUser, session: SessionDep) -> list[RoomOut]:
 async def create_room(
     body: RoomCreateIn, user: CurrentUser, session: SessionDep
 ) -> RoomOut:
+    requested_locale = normalize_locale(
+        body.locale
+        or ("ja-JP" if "のルーム" in body.name else None)
+    )
     room = Room(
         name=body.name,
         owner_id=user.id,
-        ai_mode="manual",
+        ai_mode=locale_ai_mode(requested_locale),
         world_card=body.world_card,
         current_scene=start_scene(body.world_card),
     )
@@ -836,6 +842,8 @@ async def join_room(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="room not found"
         )
+    if body.locale:
+        room.ai_mode = locale_ai_mode(body.locale)
     if not await is_member(session, room_id, user.id):
         session.add(
             RoomMember(
@@ -845,9 +853,9 @@ async def join_room(
                 appearance=body.appearance,
             )
         )
-        await session.commit()
         await _broadcast_cards_changed(room_id)
         await _broadcast_lobby_changed()
+    await session.commit()
     await session.refresh(room)
     return await room_to_out(session, room)
 
@@ -1596,7 +1604,11 @@ async def character_options(
         )
     try:
         drafts = await generate_character_options(
-            room.world_card, body.hint, body.count, nsfw=body.nsfw
+            room.world_card,
+            body.hint,
+            body.count,
+            nsfw=body.nsfw,
+            locale=body.locale or room_locale(room),
         )
     except Exception as exc:
         raise HTTPException(
@@ -1678,7 +1690,11 @@ async def design_character(
         raise HTTPException(status_code=404, detail="room not found")
     try:
         drafts = await generate_character_options(
-            room.world_card, body.hint, 1, nsfw=body.nsfw
+            room.world_card,
+            body.hint,
+            1,
+            nsfw=body.nsfw,
+            locale=body.locale or room_locale(room),
         )
     except Exception as exc:
         raise HTTPException(

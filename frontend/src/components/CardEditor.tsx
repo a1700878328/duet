@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "../lib/i18n";
 
 export interface CardDraft {
   name: string;
@@ -31,7 +32,9 @@ export function CardEditor({
   onSubmit,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<CardDraft>(initial);
+  const resolvedNameLabel = nameLabel === "名字" ? t("name") : nameLabel;
 
   function patch(key: keyof CardDraft, value: string) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -54,47 +57,47 @@ export function CardEditor({
     <div className="card-editor">
       <h4 className="card-editor-title">{title}</h4>
       <div className="field">
-        <label>{nameLabel}</label>
+        <label>{resolvedNameLabel}</label>
         <input
           className="input"
           value={draft.name}
           onChange={(e) => patch("name", e.target.value)}
-          placeholder={nameLabel}
+          placeholder={resolvedNameLabel}
         />
       </div>
       <div className="field">
-        <label>人设 persona</label>
+        <label>{t("persona")}</label>
         <textarea
           className="input card-textarea"
           value={draft.persona}
           onChange={(e) => patch("persona", e.target.value)}
-          placeholder="性格、背景、说话方式…"
+          placeholder={t("personaPlaceholder")}
           rows={4}
         />
       </div>
       <div className="field">
-        <label>外貌描述（中文，可选）</label>
+        <label>{t("appearanceDescription")}</label>
         <textarea
           className="input card-textarea"
           value={draft.appearance}
           onChange={(e) => patch("appearance", e.target.value)}
-          placeholder="如：银白色长发扎成高马尾，深紫色眼眸，精灵尖耳，身穿蓝白骑士制服"
+          placeholder={t("appearancePlaceholder")}
           rows={2}
         />
       </div>
       <div className="field">
-        <label>角色语音（可选）</label>
+        <label>{t("characterVoice")}</label>
         <input
           className="input"
           value={draft.voice_id}
           onChange={(e) => patch("voice_id", e.target.value)}
-          placeholder="Eleven voice id，或如：成熟女性，低沉威严"
+          placeholder={t("voicePlaceholder")}
         />
       </div>
       <div className="card-editor-actions">
         {onCancel && (
           <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>
-            取消
+            {t("cancel")}
           </button>
         )}
         <button
@@ -105,10 +108,10 @@ export function CardEditor({
           {saving ? (
             <>
               <span className="spinner" />
-              保存中…
+              {t("saving")}
             </>
           ) : (
-            submitLabel
+            submitLabel === "保存" ? t("save") : submitLabel
           )}
         </button>
       </div>

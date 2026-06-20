@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { LanguageSelect, useI18n } from "../lib/i18n";
 
 type Mode = "login" | "register";
 type BusyAction = "form" | `saved:${string}` | null;
@@ -52,6 +53,7 @@ function upsertSavedAccount(account: Omit<SavedAccount, "updatedAt">) {
 
 export function AuthPage() {
   const { setAuth } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
@@ -91,7 +93,7 @@ export function AuthPage() {
       navigate("/rooms", { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "网络错误，请稍后再试",
+        err instanceof ApiError ? err.message : t("networkError"),
       );
     } finally {
       setBusy(null);
@@ -117,7 +119,7 @@ export function AuthPage() {
       navigate("/rooms", { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "网络错误，请稍后再试",
+        err instanceof ApiError ? err.message : t("networkError"),
       );
     } finally {
       setBusy(null);
@@ -135,14 +137,17 @@ export function AuthPage() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
+        <div className="auth-tools">
+          <LanguageSelect compact />
+        </div>
         <div className="brand">
           <h1>duet</h1>
-          <p>双人协作 · AI 角色扮演</p>
+          <p>{t("duetTagline")}</p>
         </div>
 
         {savedAccounts.length > 0 && (
           <div className="saved-accounts">
-            <div className="saved-accounts-title">此设备账号</div>
+            <div className="saved-accounts-title">{t("savedAccounts")}</div>
             <div className="saved-account-list">
               {savedAccounts.map((account) => (
                 <div className="saved-account-row" key={account.username}>
@@ -160,9 +165,9 @@ export function AuthPage() {
                     type="button"
                     onClick={() => forgetSavedAccount(account.username)}
                     disabled={busy !== null}
-                    aria-label={`移除 ${account.username}`}
+                    aria-label={t("removeAccountLabel", { username: account.username })}
                   >
-                    移除
+                    {t("remove")}
                   </button>
                 </div>
               ))}
@@ -177,7 +182,7 @@ export function AuthPage() {
             type="button"
             disabled={busy !== null}
           >
-            登录
+            {t("login")}
           </button>
           <button
             className={`tab ${mode === "register" ? "active" : ""}`}
@@ -185,13 +190,13 @@ export function AuthPage() {
             type="button"
             disabled={busy !== null}
           >
-            注册
+            {t("register")}
           </button>
         </div>
 
         <form className="form" onSubmit={submit}>
           <div className="field">
-            <label htmlFor="username">用户名</label>
+            <label htmlFor="username">{t("username")}</label>
             <input
               id="username"
               className="input"
@@ -205,20 +210,20 @@ export function AuthPage() {
 
           {mode === "register" && (
             <div className="field">
-              <label htmlFor="display_name">显示名 / 角色昵称</label>
+              <label htmlFor="display_name">{t("displayName")}</label>
               <input
                 id="display_name"
                 className="input"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="他人看到的名字"
+                placeholder={t("displayNamePlaceholder")}
                 disabled={busy !== null}
               />
             </div>
           )}
 
           <div className="field">
-            <label htmlFor="password">密码</label>
+            <label htmlFor="password">{t("password")}</label>
             <input
               id="password"
               className="input"
@@ -240,7 +245,11 @@ export function AuthPage() {
             type="submit"
             disabled={busy !== null}
           >
-            {busy === "form" ? "请稍候…" : mode === "login" ? "登录" : "注册并进入"}
+            {busy === "form"
+              ? t("pleaseWait")
+              : mode === "login"
+                ? t("login")
+                : t("registerAndEnter")}
           </button>
         </form>
       </div>

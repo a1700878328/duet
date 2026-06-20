@@ -15,6 +15,7 @@ import type {
   UserCharacterCard,
   VoiceVariant,
 } from "./types";
+import type { Locale } from "./i18n";
 
 export interface MeCardBody {
   character_name?: string;
@@ -201,11 +202,12 @@ export const api = {
     character_name: string;
     world_card?: string | null;
     appearance?: string | null;
+    locale?: Locale;
   }) => request<Room>("/rooms", { method: "POST", body: JSON.stringify(body) }),
 
   joinRoom: (
     id: string,
-    body: { character_name: string; appearance?: string | null },
+    body: { character_name: string; appearance?: string | null; locale?: Locale },
   ) =>
     request<Room>(`/rooms/${id}/join`, {
       method: "POST",
@@ -242,7 +244,7 @@ export const api = {
   // SLOW (~count*40s): one portrait per draft. Nothing is persisted.
   characterOptions: (
     roomId: string,
-    body: { count?: number; hint?: string; nsfw?: boolean },
+    body: { count?: number; hint?: string; nsfw?: boolean; locale?: Locale },
   ) =>
     request<CharDraft[]>(`/rooms/${roomId}/character-options`, {
       method: "POST",
@@ -387,10 +389,12 @@ export function assetUrl(path: string): string {
 }
 
 // WebSocket URL builder. Resolves relative to API_BASE (or current origin in dev).
-export function roomSocketUrl(roomId: string, token: string): string {
+export function roomSocketUrl(roomId: string, token: string, locale?: string): string {
   const base = API_BASE || window.location.origin;
   const wsBase = base.replace(/^http/, "ws");
-  return `${wsBase}/ws/rooms/${roomId}?token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  if (locale) params.set("locale", locale);
+  return `${wsBase}/ws/rooms/${roomId}?${params.toString()}`;
 }
 
 export function lobbySocketUrl(token: string): string {

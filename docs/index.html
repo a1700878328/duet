@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Duet | AIロールプレイゲーム</title>
+    <meta
+      name="description"
+      content="Duetは、2人プレイとAIナレーター/NPCが同じ物語を進めるロールプレイゲームです。"
+    />
+    <link rel="stylesheet" href="site/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav">
+        <strong>Duet</strong>
+        <div>
+          <a href="#features">機能</a>
+          <a href="#screens">スクリーンショット</a>
+          <a href="#demo">デモ手順</a>
+        </div>
+      </nav>
+      <div class="hero-grid">
+        <section class="hero-copy">
+          <p class="eyebrow">AI TRPG / Co-op Roleplay</p>
+          <h1>2人とAIが同じ物語を紡ぐ、即興ロールプレイゲーム。</h1>
+          <p>
+            プレイヤーの発言、AIナレーター、NPCの反応、キャラクターカード、
+            ステータス、ワールド状況をひとつのセッションで管理します。
+            日本語UIと日本語ナレーションに対応しています。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#screens">画面を見る</a>
+            <a class="button" href="https://github.com/a1700878328/duet">GitHub</a>
+          </div>
+        </section>
+        <figure class="hero-shot">
+          <img src="site/assets/02-main-story-ja.png" alt="日本語ナレーション画面" />
+        </figure>
+      </div>
+    </header>
+
+    <main>
+      <section id="features" class="section">
+        <div class="section-head">
+          <p class="eyebrow">Features</p>
+          <h2>ゲーム内の主要機能</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <span>01</span>
+            <h3>日本語ナレーション</h3>
+            <p>ルーム作成時の言語設定をAIに伝え、ナレーターとNPCの本文を日本語で生成します。</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>キャラクター選択</h3>
+            <p>アカウントキャラ、デフォルト入室、AI生成キャラを選べます。</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>ステータス管理</h3>
+            <p>職業、ランク、能力値、所持金、状態、インベントリをセッション中に確認できます。</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>ワールド状況</h3>
+            <p>現在地、時間、NPC配置、裏側の動き、エンディングリスクをパネルで把握できます。</p>
+          </article>
+          <article>
+            <span>05</span>
+            <h3>移動と探索</h3>
+            <p>プレイヤーはシーンを移動し、AIが新しい状況をナレーションします。</p>
+          </article>
+          <article>
+            <span>06</span>
+            <h3>シーン画像生成</h3>
+            <p>現在の場面や指定したアクションをもとに、シーン画像生成の設定を行えます。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="screens" class="section dark-band">
+        <div class="section-head">
+          <p class="eyebrow">Screenshots</p>
+          <h2>実際のプレイ画面</h2>
+        </div>
+        <div class="screens">
+          <figure>
+            <img src="site/assets/01-lobby-ja.png" alt="公開ルームとルーム作成" />
+            <figcaption>公開ルームと日本語ルーム作成</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/03-character-select-ja.png" alt="キャラクター選択画面" />
+            <figcaption>キャラクター選択</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/02-main-story-ja.png" alt="日本語の物語本文" />
+            <figcaption>日本語ナレーションと入力欄</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/04-status-panel-ja.png" alt="ステータスパネル" />
+            <figcaption>ステータスパネル</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/05-world-panel-ja.png" alt="ワールド状況パネル" />
+            <figcaption>ワールド状況パネル</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/06-move-modal-ja.png" alt="移動モーダル" />
+            <figcaption>移動と探索</figcaption>
+          </figure>
+          <figure>
+            <img src="site/assets/07-image-modal-ja.png" alt="シーン画像生成モーダル" />
+            <figcaption>シーン画像生成設定</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="demo" class="section demo">
+        <div class="section-head">
+          <p class="eyebrow">Demo Flow</p>
+          <h2>発表時のおすすめ手順</h2>
+        </div>
+        <ol class="steps">
+          <li>言語を「日本語」に切り替え、公開ルーム画面でルームを作成します。</li>
+          <li>キャラクター選択を開き、デフォルト入室またはアカウントキャラを選びます。</li>
+          <li>AIナレーターが日本語で導入を書くことを確認します。</li>
+          <li>一言入力して、AI推敲・送信・NPC反応の流れを見せます。</li>
+          <li>ステータス、ワールド、移動、シーン画像生成の各パネルを順に開きます。</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

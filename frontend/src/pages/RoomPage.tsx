@@ -21,6 +21,7 @@ import { WorldStatusPanel } from "../components/WorldStatusPanel";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { MEDIA_GENERATION_ENABLED, VOICE_GENERATION_ENABLED } from "../lib/features";
+import { LanguageSelect, useI18n } from "../lib/i18n";
 import { useRoomSocket, type StatsEvent } from "../lib/useRoomSocket";
 import type {
   CharStats,
@@ -65,6 +66,7 @@ function formatDelta(delta: Record<string, StatValue>): string {
 export function RoomPage() {
   const { roomId = "" } = useParams();
   const { user, token } = useAuth();
+  const { locale, t } = useI18n();
   const navigate = useNavigate();
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -106,8 +108,8 @@ export function RoomPage() {
     setRoom(found);
     if (found?.time_label) setTimeLabel(found.time_label);
     if (found?.current_scene) setScene(found.current_scene);
-    if (!found) setLoadError("未找到房间，或你不在其中。");
-  }, [roomId]);
+    if (!found) setLoadError(t("roomMissing"));
+  }, [roomId, t]);
   const refreshCards = useCallback(async () => {
     try {
       setCards(await api.getCards(roomId));
@@ -146,11 +148,11 @@ export function RoomPage() {
         prev && data.scenes.includes(prev) ? prev : data.current_scene,
       );
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "加载场景记录失败");
+      showToast(err instanceof ApiError ? err.message : t("loadSceneLogFailed"));
     } finally {
       setSceneLogLoading(false);
     }
-  }, [roomId, showToast]);
+  }, [roomId, showToast, t]);
   const openSceneLog = useCallback(() => {
     setSceneLogOpen(true);
     void refreshSceneLog();
@@ -159,10 +161,10 @@ export function RoomPage() {
   const handleWsError = useCallback(
     (code: string, detail: string) => {
       setPolishingSay(false);
-      if (code === "ai_busy") showToast("剧情正在推进，请稍候…");
-      else showToast(detail || `错误：${code}`);
+      if (code === "ai_busy") showToast(t("aiBusyToast"));
+      else showToast(detail || `${t("errorPrefix")}：${code}`);
     },
-    [showToast],
+    [showToast, t],
   );
 
   // A "stats" event for ME: refresh my sheet + flash the just-applied delta.
@@ -209,6 +211,7 @@ export function RoomPage() {
   } = useRoomSocket({
     roomId,
     token: token ?? "",
+    locale,
     onError: handleWsError,
     onCardsChanged: handleCardsChanged,
     onStats: handleStats,
@@ -220,10 +223,10 @@ export function RoomPage() {
     onSayDraft: (content) => {
       setPolishingSay(false);
       setSayDraft(content);
-      showToast("AI 已把改写填进输入框");
+      showToast(t("sayDraftReady"));
     },
     onGodReply: (content) => {
-      showToast(content || "上帝已回应");
+      showToast(content || t("godAnswered"));
     },
   });
 
@@ -236,7 +239,7 @@ export function RoomPage() {
       })
       .catch((err) => {
         if (active)
-          setLoadError(err instanceof ApiError ? err.message : "加载房间失败");
+          setLoadError(err instanceof ApiError ? err.message : t("loadRoomsFailed"));
       });
     return () => {
       active = false;
@@ -305,14 +308,44 @@ export function RoomPage() {
       null,
     [cards, user?.id],
   );
+  const displayTimeLabel = useCallback(
+    (value: string) => {
+      if (locale !== "ja-JP") return value;
+      return value
+        .replace(/冒险/g, "冒険")
+        .replace(/第(\d+)周/g, "第$1週")
+        .replace(/第(\d+)天/g, "$1日目")
+        .replace(/清晨/g, "早朝")
+        .replace(/上午/g, "午前")
+        .replace(/中午/g, "昼")
+        .replace(/下午/g, "午後")
+        .replace(/傍晚/g, "夕方")
+        .replace(/夜晚/g, "夜")
+        .replace(/深夜/g, "深夜");
+    },
+    [locale],
+  );
+  const displaySceneName = useCallback(
+    (value?: string | null) => {
+      if (!value || value === "自由场景") return t("freeScene");
+      return value;
+    },
+    [t],
+  );
+  const shownTimeLabel = displayTimeLabel(timeLabel);
+  const shownScene = displaySceneName(scene);
   const sceneLogScenes = sceneLog?.scenes.length
     ? sceneLog.scenes
     : scene
       ? [scene]
-      : ["自由场景"];
+    : [t("freeScene")];
   const activeScene =
-    selectedScene || sceneLog?.current_scene || scene || "自由场景";
+    selectedScene || sceneLog?.current_scene || scene || t("freeScene");
   const activeSceneEntries = sceneLog?.logs[activeScene] ?? [];
+  const displaySpeaker = useCallback(
+    (speaker: string) => (speaker === "旁白" ? t("narratorLabel") : speaker),
+    [t],
+  );
   useLayoutEffect(() => {
     if (!sceneLogOpen) return;
     const el = sceneLogEntriesRef.current;
@@ -505,12 +538,12 @@ export function RoomPage() {
         playQueueRef.current.push(url);
         drainQueue();
       } catch {
-        showToast("配音失败");
+        showToast(t("voiceFailed"));
       } finally {
         setVoicing(false);
       }
     },
-    [roomId, npcByName, drainQueue, showToast, persistTtsCache],
+    [roomId, npcByName, drainQueue, showToast, persistTtsCache, t],
   );
 
   useEffect(() => {
@@ -543,7 +576,7 @@ export function RoomPage() {
         <div style={{ textAlign: "center" }}>
           <p>{loadError}</p>
           <button className="btn" onClick={() => navigate("/rooms")}>
-            返回房间列表
+            {t("backToRooms")}
           </button>
         </div>
       </div>
@@ -557,40 +590,41 @@ export function RoomPage() {
           <button
             className="btn btn-ghost"
             onClick={() => navigate("/rooms")}
-            aria-label="返回"
+            aria-label={t("back")}
           >
             ←
           </button>
-          <h2>{room?.name ?? "房间"}</h2>
+          <h2>{room?.name ?? t("room")}</h2>
           <span
             className="week-chip"
-            title="当前世界时间"
+            title={t("currentWorldTime")}
           >
-            🗓 {timeLabel}
+            🗓 {shownTimeLabel}
           </span>
           <button
             className="week-chip scene-chip"
             onClick={openSceneLog}
-            title="打开当前场景与其他已知场景的记录"
+            title={t("sceneLogTitle")}
           >
-            📍 当前：{scene || "自由场景"}
+            📍 {t("currentScene", { scene: shownScene })}
           </button>
           <button
             className="week-chip scene-chip"
             onClick={() => describeScene()}
             disabled={aiBusy || status !== "open"}
-            title="让旁白盘点当前场景里玩家与 NPC 的状态"
+            title={t("sceneStatusTitle")}
           >
-            🧭 场景状态
+            🧭 {t("sceneStatus")}
           </button>
           <span className={`status`}>
             <span className={`dot ${status}`} />
             {status === "open"
-              ? "已连接"
+              ? t("connected")
               : status === "connecting"
-                ? "连接中"
-                : "已断开"}
+                ? t("connecting")
+                : t("disconnected")}
           </span>
+          <LanguageSelect compact />
           <button
             className="btn btn-ghost cards-toggle"
             onClick={() => {
@@ -598,9 +632,9 @@ export function RoomPage() {
               setPanelOpen(false);
               setStatsOpen(false);
             }}
-            title="重新打开房间选人，选择账号卡、主角、世界角色或 AI 原创角色"
+            title={t("selectCharacterTitle")}
           >
-            选角
+            {t("selectCharacter")}
           </button>
           <button
             className={`btn btn-ghost cards-toggle ${panelOpen ? "active" : ""}`}
@@ -615,9 +649,9 @@ export function RoomPage() {
               });
             }}
             aria-pressed={panelOpen}
-            title="角色卡与登场 NPC"
+            title={t("characterCardsTitle")}
           >
-            🎭 角色
+            🎭 {t("characters")}
           </button>
           <button
             className={`btn btn-ghost cards-toggle ${statsOpen ? "active" : ""}`}
@@ -632,9 +666,9 @@ export function RoomPage() {
               });
             }}
             aria-pressed={statsOpen}
-            title="我的角色状态（女骑士模拟器式数值表）"
+            title={t("myStatusTitle")}
           >
-            📊 状态
+            📊 {t("status")}
           </button>
           <button
             className={`btn btn-ghost cards-toggle ${worldOpen ? "active" : ""}`}
@@ -650,9 +684,9 @@ export function RoomPage() {
               });
             }}
             aria-pressed={worldOpen}
-            title="世界状态、NPC 分布、后台动向与结局风险"
+            title={t("worldTitle")}
           >
-            🌐 世界
+            🌐 {t("world")}
           </button>
         </div>
 
@@ -667,14 +701,14 @@ export function RoomPage() {
                 <span>· {m.display_name}</span>
               </span>
             ))}
-            <span className="chip ai">NPC · AI</span>
+            <span className="chip ai">{t("aiNpc")}</span>
           </div>
         </div>
       </header>
 
       <div className="timeline" ref={timelineRef} onScroll={onScroll}>
         {messages.length === 0 && !streaming && (
-          <div className="empty">还没有对话。说点什么，或让 AI 起个头。</div>
+          <div className="empty">{t("emptyTimeline")}</div>
         )}
 
         {messages.map((m) => (
@@ -720,21 +754,21 @@ export function RoomPage() {
         {VOICE_GENERATION_ENABLED && voicing && (
           <div className="streaming-hint voice-hint">
             <span className="pulse" />
-            🔊 配音中…
+            🔊 {t("voiceGenerating")}
           </div>
         )}
 
         {aiBusy && (
           <div className="streaming-hint">
             <span className="pulse" />
-            剧情推进中…
+            {t("storyAdvancing")}
           </div>
         )}
 
         {MEDIA_GENERATION_ENABLED && imaging && (
           <div className="streaming-hint">
             <span className="pulse" />
-            生成场景图中…（约 30–60 秒）
+            {t("imageGeneratingLong")}
           </div>
         )}
       </div>
@@ -754,17 +788,24 @@ export function RoomPage() {
               className="btn"
               onClick={() => setImageModalOpen(true)}
               disabled={imaging}
-              title="生成场景图像"
+              title={t("generateSceneImage")}
             >
-              {imaging ? <><span className="spinner" />生成中</> : "生成场景图"}
+              {imaging ? (
+                <>
+                  <span className="spinner" />
+                  {t("imageGenerating")}
+                </>
+              ) : (
+                t("generateSceneImage")
+              )}
             </button>
           )}
           <button
             className="btn"
             onClick={() => setMoveModalOpen(true)}
-            title="前往其他场景"
+            title={t("move")}
           >
-            🚶 移动
+            🚶 {t("move")}
           </button>
         </div>
       </div>
@@ -804,8 +845,8 @@ export function RoomPage() {
         onClose={() => setWorldOpen(false)}
         cards={cards}
         sceneLog={sceneLog}
-        currentScene={scene}
-        timeLabel={timeLabel}
+        currentScene={shownScene}
+        timeLabel={shownTimeLabel}
         myStats={myStats}
         characterName={myCard?.character_name}
         loading={sceneLogLoading}
@@ -824,8 +865,8 @@ export function RoomPage() {
           <div className="scene-log-card" onClick={(e) => e.stopPropagation()}>
             <div className="scene-log-head">
               <div>
-                <h3>场景记录</h3>
-                <p>{timeLabel}</p>
+                <h3>{t("sceneRecord")}</h3>
+                <p>{shownTimeLabel}</p>
               </div>
               <div className="scene-log-actions">
                 <button
@@ -833,12 +874,12 @@ export function RoomPage() {
                   onClick={() => void refreshSceneLog()}
                   disabled={sceneLogLoading}
                 >
-                  刷新
+                  {t("refresh")}
                 </button>
                 <button
                   className="pf-close"
                   onClick={() => setSceneLogOpen(false)}
-                  aria-label="关闭"
+                  aria-label={t("close")}
                 >
                   ✕
                 </button>
@@ -851,7 +892,7 @@ export function RoomPage() {
                   <button
                     key={n.id}
                     className={`scene-npc-avatar ${n.scene === activeScene ? "active" : ""}`}
-                    title={`${n.name} · ${n.scene || "随队/当前场景"}`}
+                    title={`${n.name} · ${n.scene || t("followersCurrentScene")}`}
                     onClick={() => {
                       if (n.scene) setSelectedScene(n.scene);
                     }}
@@ -873,7 +914,7 @@ export function RoomPage() {
                       onClick={() => setSelectedScene(s)}
                     >
                       <span>{s}</span>
-                      {s === sceneLog?.current_scene && <em>当前</em>}
+                      {s === sceneLog?.current_scene && <em>{t("current")}</em>}
                     </button>
                   </div>
                 ))}
@@ -881,14 +922,14 @@ export function RoomPage() {
               <div className="scene-log-entries" ref={sceneLogEntriesRef}>
                 <div className="scene-log-title">
                   <strong>{activeScene}</strong>
-                  {sceneLogLoading && <span>加载中…</span>}
+                  {sceneLogLoading && <span>{t("sceneLoading")}</span>}
                 </div>
                 <div className="scene-log-npcs">
                   👥 {(cards?.npcs ?? [])
                     .filter((n) => n.name !== "上帝")
                     .filter((n) => !n.scene || n.scene === activeScene)
                     .map((n) => n.name)
-                    .join("、") || "无"}
+                    .join("、") || t("sceneNpcEmpty")}
                 </div>
                 {activeSceneEntries.length > 0 ? (
                   activeSceneEntries.map((entry, idx) => (
@@ -898,14 +939,14 @@ export function RoomPage() {
                     >
                       <div className="scene-log-meta">
                         <span>{entry.time_label}</span>
-                        <b>{entry.speaker_label}</b>
+                        <b>{displaySpeaker(entry.speaker_label)}</b>
                       </div>
                       <div className="scene-log-text">{entry.content}</div>
                     </div>
                   ))
                 ) : (
                   <div className="scene-log-empty">
-                    这个场景还没有记录。NPC 会随着玩家发言在各自场景持续行动。
+                    {t("sceneEmpty")}
                   </div>
                 )}
               </div>
@@ -944,17 +985,17 @@ export function RoomPage() {
       {imageModalOpen && (
         <div className="overlay-backdrop" onClick={() => setImageModalOpen(false)}>
           <div className="move-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>📷 生成场景图</h3>
-            <label>动作描述</label>
+            <h3>📷 {t("generateSceneImage")}</h3>
+            <label>{t("imageAction")}</label>
             <input
               type="text"
               className="input"
-              placeholder="如：银发紫瞳的盲眼圣女，跪坐在教堂长椅上"
+              placeholder={t("imageActionPlaceholder")}
               value={imageText}
               onChange={(e) => setImageText(e.target.value)}
               autoFocus
             />
-            <label style={{ marginTop: 12 }}>出场角色（勾选要出场的角色）</label>
+            <label style={{ marginTop: 12 }}>{t("imageCharacters")}</label>
             <div className="npc-checklist">
               {cards?.players?.map((p) => (
                 <label key={p.user_id} className="npc-check-item">
@@ -968,7 +1009,7 @@ export function RoomPage() {
                       setImageChars(next);
                     }}
                   />
-                  {p.character_name}（我）
+                  {p.character_name}（{t("me")}）
                 </label>
               ))}
               {(cards?.npcs ?? [])
@@ -990,10 +1031,10 @@ export function RoomPage() {
                   </label>
                 ))}
             </div>
-            <div className="image-toggle-group" aria-label="场景图设置">
+            <div className="image-toggle-group" aria-label={t("imageSettings")}>
               <label
                 className={`image-soft-toggle ${imageNsfw ? "active" : ""}`}
-                title="关闭时强制按普通场景生成"
+                title={t("forceNormalScene")}
               >
                 <input
                   type="checkbox"
@@ -1001,24 +1042,24 @@ export function RoomPage() {
                   onChange={(e) => setImageNsfw(e.target.checked)}
                 />
                 <span className="image-soft-switch" aria-hidden="true" />
-                <span>特殊</span>
+                <span>{t("specialMode")}</span>
               </label>
-              <div className="image-quality-tabs" role="group" aria-label="生成质量">
+              <div className="image-quality-tabs" role="group" aria-label={t("imageQuality")}>
                 <button
                   type="button"
                   className={imageQuality === "fast" ? "active" : ""}
                   onClick={() => setImageQuality("fast")}
-                  title="关超分和局部修补，优先看构图"
+                  title={t("fastPreviewTitle")}
                 >
-                  快速预览
+                  {t("fastPreview")}
                 </button>
                 <button
                   type="button"
                   className={imageQuality === "refined" ? "active" : ""}
                   onClick={() => setImageQuality("refined")}
-                  title="开启超分和精修，耗时更久"
+                  title={t("refinedImageTitle")}
                 >
-                  精修出图
+                  {t("refinedImage")}
                 </button>
               </div>
             </div>
@@ -1039,10 +1080,17 @@ export function RoomPage() {
                   setImageModalOpen(false);
                 }}
               >
-                {imaging ? <><span className="spinner" />生成中</> : "生成"}
+                {imaging ? (
+                  <>
+                    <span className="spinner" />
+                    {t("imageGenerating")}
+                  </>
+                ) : (
+                  t("generate")
+                )}
               </button>
               <button className="btn btn-ghost" onClick={() => { setImageModalOpen(false); setImageText(""); setImageChars(new Set()); }}>
-                取消
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -1052,12 +1100,12 @@ export function RoomPage() {
       {moveModalOpen && (
         <div className="overlay-backdrop" onClick={() => setMoveModalOpen(false)}>
           <div className="move-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>🚶 移动</h3>
-            <label>目标场景</label>
+            <h3>🚶 {t("move")}</h3>
+            <label>{t("targetScene")}</label>
             <input
               type="text"
               className="input"
-              placeholder="输入场景名"
+              placeholder={t("targetScenePlaceholder")}
               value={moveScene}
               onChange={(e) => setMoveScene(e.target.value)}
             />
@@ -1074,7 +1122,7 @@ export function RoomPage() {
                 ))}
               </div>
             )}
-            <label style={{ marginTop: 12 }}>携带 NPC</label>
+            <label style={{ marginTop: 12 }}>{t("carryNpcs")}</label>
             <div className="npc-checklist">
               {(cards?.npcs ?? [])
                 .filter((n) => n.name !== "上帝")
@@ -1106,10 +1154,10 @@ export function RoomPage() {
                   setSelectedMoveNpcs(new Set());
                 }}
               >
-                移动
+                {t("move")}
               </button>
               <button className="btn btn-ghost" onClick={() => setMoveModalOpen(false)}>
-                取消
+                {t("cancel")}
               </button>
             </div>
           </div>

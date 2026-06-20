@@ -1,0 +1,259 @@
+:root {
+  color-scheme: dark;
+  --bg: #090712;
+  --panel: #141020;
+  --panel-2: #1f1530;
+  --ink: #f7f0ff;
+  --muted: #bcb0ce;
+  --line: #392a52;
+  --accent: #ff7ab6;
+  --accent-2: #55e0a3;
+  --gold: #ffd36a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 122, 182, 0.18), transparent 26rem),
+    radial-gradient(circle at 88% 20%, rgba(85, 224, 163, 0.12), transparent 22rem),
+    var(--bg);
+  color: var(--ink);
+  font-family:
+    "Inter", "Noto Sans JP", "Yu Gothic UI", "Hiragino Kaku Gothic ProN",
+    system-ui, sans-serif;
+  line-height: 1.7;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  width: 100%;
+}
+
+.hero,
+.section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0 28px;
+}
+
+.nav strong {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.nav div {
+  display: flex;
+  gap: 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hero-grid {
+  min-height: calc(100vh - 96px);
+  display: grid;
+  grid-template-columns: 0.92fr 1.08fr;
+  gap: 36px;
+  align-items: center;
+}
+
+.hero-copy h1 {
+  margin: 10px 0 18px;
+  font-size: clamp(40px, 6vw, 74px);
+  line-height: 1.04;
+  letter-spacing: 0;
+}
+
+.hero-copy p {
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.button.primary {
+  background: linear-gradient(135deg, #8d4cff, #ff6aa9);
+  border-color: transparent;
+}
+
+.hero-shot,
+.screens figure {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+.hero-shot img {
+  min-height: 430px;
+  object-fit: cover;
+  object-position: left center;
+}
+
+.section {
+  padding-top: 76px;
+  padding-bottom: 76px;
+}
+
+.section-head {
+  max-width: 720px;
+  margin-bottom: 28px;
+}
+
+.section-head h2 {
+  margin: 8px 0 0;
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.feature-grid article {
+  min-height: 210px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+}
+
+.feature-grid span {
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.feature-grid h3 {
+  margin: 12px 0 8px;
+  font-size: 20px;
+}
+
+.feature-grid p,
+.steps {
+  color: var(--muted);
+}
+
+.dark-band {
+  max-width: none;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(15, 10, 26, 0.72);
+}
+
+.dark-band > * {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.screens {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.screens figure:first-child,
+.screens figure:nth-child(3) {
+  grid-column: span 2;
+}
+
+.screens img {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.screens figcaption {
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.demo {
+  max-width: 920px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 24px;
+  font-size: 18px;
+}
+
+.steps li {
+  margin: 12px 0;
+  padding-left: 8px;
+}
+
+@media (max-width: 860px) {
+  .nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero-grid,
+  .feature-grid,
+  .screens {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-grid {
+    min-height: auto;
+  }
+
+  .screens figure:first-child,
+  .screens figure:nth-child(3) {
+    grid-column: span 1;
+  }
+
+  .hero-shot img {
+    min-height: 260px;
+  }
+}

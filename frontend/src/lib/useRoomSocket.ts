@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, roomSocketUrl } from "./api";
+import type { Locale } from "./i18n";
 import type {
   CharStats,
   ConnectionStatus,
@@ -19,6 +20,7 @@ export interface StatsEvent {
 interface UseRoomSocketOptions {
   roomId: string;
   token: string;
+  locale?: Locale;
   onError?: (code: string, detail: string) => void;
   onCardsChanged?: () => void;
   onStats?: (ev: StatsEvent) => void;
@@ -66,6 +68,7 @@ const RECONNECT_MAX_MS = 8000;
 export function useRoomSocket({
   roomId,
   token,
+  locale = "zh-CN",
   onError,
   onCardsChanged,
   onStats,
@@ -237,7 +240,7 @@ export function useRoomSocket({
       reconnectTimerRef.current = null;
     }
     setStatus("connecting");
-    const ws = new WebSocket(roomSocketUrl(roomId, token));
+    const ws = new WebSocket(roomSocketUrl(roomId, token, locale));
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -271,7 +274,7 @@ export function useRoomSocket({
     ws.onerror = () => {
       ws.close();
     };
-  }, [roomId, token, backfill, handleEvent]);
+  }, [roomId, token, locale, backfill, handleEvent]);
 
   useEffect(() => {
     closedByUserRef.current = false;
@@ -288,9 +291,9 @@ export function useRoomSocket({
   const send = useCallback((payload: WsClientEvent) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(payload));
+      ws.send(JSON.stringify({ ...payload, locale }));
     }
-  }, []);
+  }, [locale]);
 
   const say = useCallback(
     (content: string) => {

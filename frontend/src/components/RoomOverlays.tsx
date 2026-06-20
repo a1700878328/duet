@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { assetUrl } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import type { CharStats } from "../lib/types";
 
 // A resolved profile for the avatar popover — player (with stats) or NPC.
@@ -31,9 +32,23 @@ const KEY_STATS: string[] = [
 ];
 
 function StatRow({ k, v }: { k: string; v: unknown }) {
+  const { t } = useI18n();
+  const labelKeys: Record<string, string> = {
+    职业: "job",
+    冒险者等级: "adventurerRank",
+    等级: "level",
+    经验: "experience",
+    金钱: "money",
+    力量: "strength",
+    敏捷: "agility",
+    智力: "intelligence",
+    意志: "will",
+    淫乱: "lust",
+    欲望: "desire",
+  };
   return (
     <div className="pf-stat">
-      <span className="pf-stat-k">{k}</span>
+      <span className="pf-stat-k">{t(labelKeys[k] ?? k)}</span>
       <span className="pf-stat-v">{String(v)}</span>
     </div>
   );
@@ -71,6 +86,7 @@ export function ProfileModal({
   currentMoney?: number | null;
   paymentBusy?: boolean;
 }) {
+  const { t } = useI18n();
   const [payAmount, setPayAmount] = useState("");
   const stats = profile.stats ?? null;
   const rawStates = Array.isArray(stats?.["状态"]) ? stats!["状态"] : [];
@@ -108,7 +124,7 @@ export function ProfileModal({
   return (
     <Backdrop onClose={onClose} className="profile">
       <div className="pf-card">
-        <button className="pf-close" onClick={onClose} aria-label="关闭">
+        <button className="pf-close" onClick={onClose} aria-label={t("close")}>
           ✕
         </button>
         <div className="pf-portrait">
@@ -123,33 +139,33 @@ export function ProfileModal({
         <div className="pf-name">
           {profile.name}
           <span className="pf-kind">
-            {profile.kind === "player" ? "玩家" : "NPC"}
+            {profile.kind === "player" ? t("player") : "NPC"}
             {profile.scene ? ` · 📍${profile.scene}` : ""}
           </span>
         </div>
 
         {profile.appearance && (
           <div className="pf-section">
-            <div className="pf-label">外貌</div>
+            <div className="pf-label">{t("profileAppearance")}</div>
             <div className="pf-text">{profile.appearance}</div>
           </div>
         )}
         {profile.persona && (
           <div className="pf-section">
-            <div className="pf-label">设定</div>
+            <div className="pf-label">{t("profileSetting")}</div>
             <div className="pf-text">{profile.persona}</div>
           </div>
         )}
         {profile.discovered && (
           <div className="pf-section">
-            <div className="pf-label">已了解到（随剧情更新）</div>
+            <div className="pf-label">{t("profileDiscovered")}</div>
             <div className="pf-text">{profile.discovered}</div>
           </div>
         )}
 
         {profile.kind === "npc" && profile.id !== undefined && onPayNpc && (
           <form className="pf-pay" onSubmit={submitPayment}>
-            <div className="pf-label">支付</div>
+            <div className="pf-label">{t("payment")}</div>
             <div className="pf-pay-row">
               <input
                 type="number"
@@ -158,23 +174,23 @@ export function ProfileModal({
                 inputMode="numeric"
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
-                placeholder="金额"
+                placeholder={t("amount")}
                 disabled={paymentBusy}
               />
               <button className="btn btn-sm" type="submit" disabled={!canPay}>
-                支付
+                {t("payment")}
               </button>
             </div>
             <div className={`pf-pay-hint ${lacksMoney ? "warn" : ""}`}>
-              当前金钱：{currentMoney ?? "?"}
-              {lacksMoney ? `，不足支付 ${validAmount}` : ""}
+              {t("currentMoney", { money: currentMoney ?? "?" })}
+              {lacksMoney ? t("insufficientPayment", { amount: validAmount }) : ""}
             </div>
           </form>
         )}
 
         {profile.kind === "player" && stats && (
           <div className="pf-section">
-            <div className="pf-label">状态属性</div>
+            <div className="pf-label">{t("statusAttributes")}</div>
             <div className="pf-stats">
               {KEY_STATS.filter((k) => stats[k] !== undefined).map((k) => (
                 <StatRow key={k} k={k} v={stats[k]} />
@@ -221,9 +237,10 @@ export function ImageLightbox({
   url: string;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Backdrop onClose={onClose} className="lightbox">
-      <img className="lightbox-img" src={assetUrl(url)} alt="场景图" />
+      <img className="lightbox-img" src={assetUrl(url)} alt={t("sceneImageLabel")} />
     </Backdrop>
   );
 }

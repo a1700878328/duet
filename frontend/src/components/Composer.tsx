@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   onSend: (text: string) => void;
@@ -23,6 +24,7 @@ export function Composer({
   polishing = false,
   draftText,
 }: Props) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -69,7 +71,7 @@ export function Composer({
       <textarea
         ref={ref}
         rows={1}
-        placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
+        placeholder={t("composerPlaceholder")}
         value={text}
         onChange={onChange}
         onKeyDown={onKeyDown}
@@ -79,22 +81,22 @@ export function Composer({
         onClick={send}
         disabled={disabled || !text.trim()}
       >
-        发送
+        {t("send")}
       </button>
       {onPolish && (
         <button
           className="btn btn-ghost polish-btn"
           onClick={() => onPolish(text)}
           disabled={disabled || polishing || !text.trim()}
-          title="让 AI 按你的角色卡改写到输入框，不会自动发送"
+          title={t("polishTitle")}
         >
           {polishing ? (
             <>
               <span className="spinner spinner-dark" />
-              改写中…
+              {t("polishing")}
             </>
           ) : (
-            "AI 改写"
+            t("aiPolish")
           )}
         </button>
       )}

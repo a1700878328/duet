@@ -66,6 +66,9 @@ input,
 textarea {
   font-family: inherit;
 }
+select {
+  font-family: inherit;
+}
 
 /* ---------- generic ---------- */
 
@@ -161,6 +164,11 @@ textarea {
   padding: 28px;
   box-shadow: var(--shadow);
 }
+.auth-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin: -8px -6px 8px 0;
+}
 .brand {
   text-align: center;
   margin-bottom: 6px;
@@ -252,6 +260,24 @@ textarea {
   border-radius: var(--radius-sm);
   padding: 4px;
   margin: 22px 0 18px;
+}
+
+.language-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.language-select .input {
+  width: auto;
+  min-width: 116px;
+  padding: 8px 28px 8px 10px;
+  font-size: 13px;
+}
+.language-select.compact .input {
+  min-width: 104px;
 }
 
 /* ---------- agent prompt admin ---------- */

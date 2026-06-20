@@ -8,6 +8,7 @@ PLAYER 角色草稿（含英文视觉tag外貌描述 + 中文声音设计），�
 from typing import Any
 
 from .agent_sdk import agent
+from .i18n import language_instruction, normalize_locale
 from .json_utils import parse_json_array as _parse_json_array
 
 _WORLDS = {
@@ -42,6 +43,7 @@ async def generate_character_options(
     count: int,
     *,
     nsfw: bool = False,
+    locale: str | None = None,
 ) -> list[dict[str, Any]]:
     """生成 count 个玩家角色草稿 dict（name/persona/appearance/voice_id）。
 
@@ -49,6 +51,7 @@ async def generate_character_options(
     source of truth.
     """
     world_label = _WORLDS.get(world_card or "", world_card or "")
+    locale = normalize_locale(locale)
     results: list[dict[str, Any]] = []
     for i in range(count):
         desc = hint or f"风格各异的玩家角色，第{i+1}个"
@@ -68,6 +71,11 @@ async def generate_character_options(
             "服装、道具、种族、体型或核心气质。persona 写 4-7 句；appearance 写 250-700 字，"
             "必须有足够视觉细节供后续画图 AI 锁定角色。"
         )
+        if locale == "ja-JP":
+            user += (
+                "\n输出语言：日本語。name は日本語のキャラクター名、persona は4-7文の自然な日本語、"
+                "appearance は250-700字程度の自然な日本語、voice_id も日本語の声質説明にしてください。"
+            )
         if not nsfw:
             user += (
                 " NSFW=false 时必须服装完整，不得裸露胸部/生殖器，不得写裸体、"
@@ -75,7 +83,8 @@ async def generate_character_options(
             )
         if world_label:
             user = f"世界设定：{world_label}\n{user}"
-        draft = await agent.run("character_design", input=user)
+        user = f"{language_instruction(locale)}\n{user}"
+        draft = await agent.run("character_design", input=user, locale=locale)
         if draft.get("name"):
             cleaned = _clean_draft(draft)
             if cleaned:

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, lobbySocketUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { LanguageSelect, useI18n } from "../lib/i18n";
 import type { Room } from "../lib/types";
 
 export function RoomsPage() {
   const { user, token, logout } = useAuth();
+  const { locale, t } = useI18n();
   const navigate = useNavigate();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,11 +25,11 @@ export function RoomsPage() {
       setRooms(await api.listRooms());
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载房间失败");
+      setError(err instanceof ApiError ? err.message : t("loadRoomsFailed"));
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -71,17 +73,20 @@ export function RoomsPage() {
     setBusy(true);
     setError(null);
     try {
-      const name = newName.trim() || `${user?.display_name ?? "我"}的房间`;
+      const name =
+        newName.trim() ||
+        t("myRoomName", { name: user?.display_name ?? t("me") });
       // Character setup happens in-room via CharacterSelect; default to the
       // display name so the member exists — the selector sets the real one.
       const room = await api.createRoom({
         name,
-        character_name: user?.display_name || "玩家",
+        character_name: user?.display_name || t("player"),
         world_card: newWorld || null,
+        locale,
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创建失败");
+      setError(err instanceof ApiError ? err.message : t("createFailed"));
       setBusy(false);
     }
   }
@@ -89,7 +94,7 @@ export function RoomsPage() {
   async function deleteRoom(room: Room) {
     if (
       !window.confirm(
-        `删除房间「${room.name}」？房间内所有对话、角色、NPC 都会一并清空，无法恢复。`,
+        t("deleteRoomConfirm", { room: room.name }),
       )
     )
       return;
@@ -99,7 +104,7 @@ export function RoomsPage() {
       await api.deleteRoom(String(room.id));
       setRooms((prev) => prev.filter((r) => String(r.id) !== String(room.id)));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "删除失败");
+      setError(err instanceof ApiError ? err.message : t("deleteFailed"));
     } finally {
       setDeletingId(null);
     }
@@ -112,11 +117,12 @@ export function RoomsPage() {
     setError(null);
     try {
       const room = await api.joinRoom(joinId.trim(), {
-        character_name: user?.display_name || "玩家",
+        character_name: user?.display_name || t("player"),
+        locale,
       });
       navigate(`/rooms/${room.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加入失败");
+      setError(err instanceof ApiError ? err.message : t("joinFailed"));
       setBusy(false);
     }
   }
@@ -131,11 +137,12 @@ export function RoomsPage() {
     setError(null);
     try {
       const joined = await api.joinRoom(String(room.id), {
-        character_name: user?.display_name || "玩家",
+        character_name: user?.display_name || t("player"),
+        locale,
       });
       navigate(`/rooms/${joined.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加入失败");
+      setError(err instanceof ApiError ? err.message : t("joinFailed"));
       setBusy(false);
     }
   }
@@ -143,14 +150,15 @@ export function RoomsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h2>公开房间</h2>
+        <h2>{t("publicRooms")}</h2>
         <div className="row">
+          <LanguageSelect compact />
           <span className="muted">{user?.display_name}</span>
           <button className="btn btn-ghost" onClick={() => navigate("/agents")}>
-            Agents
+            {t("agents")}
           </button>
           <button className="btn btn-ghost" onClick={logout}>
-            退出
+            {t("logout")}
           </button>
         </div>
       </div>
@@ -158,11 +166,13 @@ export function RoomsPage() {
       {error && <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div className="panel">
-        <h3>创建房间</h3>
+        <h3>{t("createRoom")}</h3>
         <form className="inline-form" onSubmit={createRoom}>
           <input
             className="input"
-            placeholder={`房间名（留空＝${user?.display_name ?? "我"}的房间）`}
+            placeholder={t("roomNamePlaceholder", {
+              name: user?.display_name ?? t("me"),
+            })}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
@@ -170,39 +180,39 @@ export function RoomsPage() {
             className="input"
             value={newWorld}
             onChange={(e) => setNewWorld(e.target.value)}
-            title="世界卡"
+            title={t("worldCard")}
           >
-            <option value="">无世界卡</option>
-            <option value="ksim">女骑士模拟器</option>
+            <option value="">{t("noWorldCard")}</option>
+            <option value="ksim">{t("ksimWorld")}</option>
           </select>
           <button className="btn btn-primary" disabled={busy}>
-            创建
+            {t("create")}
           </button>
         </form>
         <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-          进入房间后会让你选角色（AI 生成参考图任你挑，或自己描述）。世界卡＝这场戏的背景设定。
+          {t("createRoomHint")}
         </p>
       </div>
 
       <div className="panel">
-        <h3>按 ID 加入</h3>
+        <h3>{t("joinById")}</h3>
         <form className="inline-form" onSubmit={joinRoom}>
           <input
             className="input"
-            placeholder="房间 ID"
+            placeholder={t("roomId")}
             value={joinId}
             onChange={(e) => setJoinId(e.target.value)}
           />
           <button className="btn" disabled={busy}>
-            加入
+            {t("join")}
           </button>
         </form>
       </div>
 
       {loading ? (
-        <div className="empty">加载中…</div>
+        <div className="empty">{t("loading")}</div>
       ) : rooms.length === 0 ? (
-        <div className="empty">还没有公开房间，创建一个开始吧。</div>
+        <div className="empty">{t("noPublicRooms")}</div>
       ) : (
         <div className="room-list">
           {rooms.map((room) => {
@@ -224,8 +234,8 @@ export function RoomsPage() {
                 {isOwner && (
                   <button
                     className="room-delete"
-                    title="删除房间（仅房主）"
-                    aria-label="删除房间"
+                    title={t("deleteRoomTitle")}
+                    aria-label={t("deleteRoomLabel")}
                     disabled={deletingId === String(room.id)}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -243,11 +253,11 @@ export function RoomsPage() {
                       <span>· {m.display_name}</span>
                     </span>
                   ))}
-                  <span className="chip ai">NPC · AI</span>
+                  <span className="chip ai">{t("aiNpc")}</span>
                   {room.world_card === "ksim" && (
-                    <span className="chip">🗺 女骑士模拟器</span>
+                    <span className="chip">🗺 {t("ksimWorld")}</span>
                   )}
-                  {!isMember && <span className="chip">可加入</span>}
+                  {!isMember && <span className="chip">{t("joinable")}</span>}
                 </div>
               </div>
             );

@@ -98,11 +98,13 @@ class RoomCreateIn(BaseModel):
     character_name: str = Field(min_length=1, max_length=128)
     world_card: str | None = Field(default=None, max_length=32)
     appearance: str | None = Field(default=None, max_length=2000)
+    locale: str | None = Field(default=None, max_length=16)
 
 
 class RoomJoinIn(BaseModel):
     character_name: str = Field(min_length=1, max_length=128)
     appearance: str | None = Field(default=None, max_length=2000)
+    locale: str | None = Field(default=None, max_length=16)
 
 
 class MeCardUpdateIn(BaseModel):
@@ -213,6 +215,7 @@ class CharOptionsIn(BaseModel):
     count: int = Field(default=3, ge=1, le=4)
     hint: str | None = Field(default=None, max_length=500)
     nsfw: bool = False
+    locale: str | None = Field(default=None, max_length=16)
 
 
 class CharDraftOut(BaseModel):

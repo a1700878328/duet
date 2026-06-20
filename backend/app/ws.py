@@ -39,6 +39,7 @@ from .imagegen.anima import (
 )
 from .imagegen.quality import annotate_quality_result
 from .imagegen.scene_prompt import build_scene_prompt
+from .i18n import language_instruction, locale_ai_mode, normalize_locale, room_locale
 from .json_utils import parse_json_object
 from .lore import store as lore_store
 from .memory import store as memory_store
@@ -97,6 +98,12 @@ from .world_presets import alternate_form_base_name, scene_options
 
 router = APIRouter()
 _MESSAGE_LOCKS: dict[int, asyncio.Lock] = {}
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")
+_ZH_HINT_RE = re.compile(
+    r"(这|那|你|我|他|她|们|是|了|的|在|不|有|和|把|被|会|要|给|里|吧|吗|呢|"
+    r"当前|场景|玩家|旁白|银币|房间|想发言|理由|剧情)"
+)
 
 
 def _message_lock(room_id: int) -> asyncio.Lock:
@@ -105,6 +112,53 @@ def _message_lock(room_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _MESSAGE_LOCKS[room_id] = lock
     return lock
+
+
+async def _sync_room_locale_from_payload(room_id: int, payload: dict[str, Any]) -> None:
+    locale_raw = payload.get("locale")
+    if not locale_raw:
+        return
+    locale = normalize_locale(locale_raw)
+    async with SessionFactory() as session:
+        room = await session.get(Room, room_id)
+        if room is None:
+            return
+        next_mode = locale_ai_mode(locale)
+        if room.ai_mode != next_mode:
+            room.ai_mode = next_mode
+            await session.commit()
+
+
+def _looks_like_chinese_text(text: str) -> bool:
+    sample = re.sub(r"\[\[.*?\]\]", "", text or "", flags=re.DOTALL)
+    cjk = len(_CJK_RE.findall(sample))
+    if cjk < 6:
+        return False
+    kana = len(_KANA_RE.findall(sample))
+    if kana >= max(3, cjk // 6):
+        return False
+    return bool(_ZH_HINT_RE.search(sample)) or kana == 0
+
+
+async def _ensure_japanese_text(text: str, *, context: str = "") -> str:
+    clean = (text or "").strip()
+    if not clean or not _looks_like_chinese_text(clean):
+        return text
+    try:
+        translated = await agent.run(
+            "localize_to_japanese",
+            input=(
+                f"文脈：{context}\n\n"
+                "以下の本文を日本語にしてください。本文のみ出力：\n"
+                f"{clean}"
+            ),
+            locale="ja-JP",
+        )
+        translated = str(translated or "").strip()
+        return translated or text
+    except Exception as exc:  # noqa: BLE001
+        print(f"[I18N] Japanese fallback failed: {type(exc).__name__}: {exc}", flush=True)
+        return text
 
 
 class RoomCoordinator:
@@ -514,7 +568,7 @@ def _narration_body(content: str | None) -> str:
     if not match:
         return text
     label = match.group(1).strip()
-    if label != "旁白":
+    if label not in {"旁白", "ナレーター", "Narrator", "narrator"}:
         return ""
     return match.group(2).strip()
 
@@ -550,6 +604,13 @@ def _ksim_seed_query(scene: str = "", extra: str = "") -> str:
 def _fallback_opening(room: Room, _members: list[RoomMember]) -> str:
     scene = room.current_scene or "这个世界的一角"
     world = _world_label(room.world_card)
+    if room_locale(room) == "ja-JP":
+        jp_world = "『女騎士シミュレーター』" if room.world_card == "ksim" else world
+        return (
+            f"{jp_world}の物語は「{scene}」から始まる。"
+            "街の秩序、噂、危険、そしてまだ名を持たない選択が、静かに動き出そうとしていた。"
+            "ここでは一つの行動が、誰かの立場も、欲望も、運命も変えていく。"
+        )
     if room.world_card == "ksim":
         return (
             "这是一个靠冒险者维持秩序、也靠冒险者消耗欲望与危险的城镇。"
@@ -589,15 +650,18 @@ async def _generate_opening_narration(
         8,
     )
     try:
+        locale_note = language_instruction(room_locale(room))
         text = await agent.run(
             "opening_narration",
             input=(
-                f"房间：{room.name}\n"
+                (f"{locale_note}\n" if locale_note else "")
+                + f"房间：{room.name}\n"
                 f"世界：{_world_label(room.world_card)}\n"
                 f"开局场景：{room.current_scene or '自由场景'}\n"
                 f"可见/相关 NPC：\n{npc_lines}"
                 + (f"\n\n{lore}" if lore else "")
             ),
+            locale=room_locale(room),
         )
     except Exception:  # noqa: BLE001 — opening should never block room entry
         text = ""
@@ -610,6 +674,14 @@ async def _broadcast_narration(
     body = _narration_body(content)
     if not body:
         return None
+    async with SessionFactory() as session:
+        room = await session.get(Room, coord.room_id)
+        locale = room_locale(room) if room is not None else "zh-CN"
+    if locale == "ja-JP":
+        body = await _ensure_japanese_text(
+            body,
+            context=f"narration; room={coord.room_id}",
+        )
     msg = await _persist_message(
         room_id=coord.room_id,
         author_type="ai",
@@ -647,6 +719,7 @@ async def _evolve_personas_from_story(coord: RoomCoordinator) -> None:
         room = await session.get(Room, coord.room_id)
         if room is None:
             return
+        locale = room_locale(room)
         meta: dict[str, Any] = json.loads(room.scenes_meta) if room.scenes_meta else {}
         last_week = meta.get(_PERSONA_EVOLVED_KEY, 0)
         current_week = max(
@@ -1552,13 +1625,15 @@ async def _handle_describe_scene(coord: RoomCoordinator) -> None:
             text = await agent.run(
                 "describe_scene",
                 input=(
-                    f"房间：{room.name}\n"
+                    (f"{language_instruction(locale)}\n" if language_instruction(locale) else "")
+                    + f"房间：{room.name}\n"
                     f"世界：{_world_label(room.world_card)}\n"
                     f"当前场景：{current_scene or '自由场景'}\n\n"
                     f"玩家角色：\n{players}\n\n"
                     f"当前场景 NPC：\n{npc_lines}\n\n"
                     f"最近场面：\n{recent}" + (f"\n\n{lore}" if lore else "")
                 ),
+                locale=locale,
             )
         except Exception:  # noqa: BLE001 — scene summary is convenience only
             text = ""
@@ -1738,6 +1813,7 @@ async def _generate_guarded(
     forbidden: list[str],
     *,
     required_label: str | None = None,
+    locale: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """生成不冒充真人角色的 AI 回复。
 
@@ -1801,7 +1877,13 @@ async def _generate_guarded(
     last_clean = ""
     last_violated = False
     for attempt, prompt_messages in enumerate(prompts, start=1):
-        raw = (await agent.run("npc_dialogue_text", messages=prompt_messages)).strip()
+        raw = (
+            await agent.run(
+                "npc_dialogue_text",
+                messages=prompt_messages,
+                locale=locale,
+            )
+        ).strip()
         candidate_source = raw
         if required_label:
             try:
@@ -1987,6 +2069,7 @@ async def _run_ai_turn(
         )
         history = await messages_after(session, coord.room_id, 0, limit=200)
         world_card = room.world_card
+        locale = room_locale(room)
         current_scene = await ensure_room_scene(session, room)
         clock_label = room_time(room).label
         player_names = [m.character_name for m in members if m.character_name]
@@ -2009,6 +2092,9 @@ async def _run_ai_turn(
     messages = history_to_messages(
         system_prompt, history, window=settings.history_window
     )
+    locale_note = language_instruction(locale)
+    if locale_note:
+        messages.insert(1, {"role": "system", "content": locale_note})
     messages.insert(
         1,
         {
@@ -2108,6 +2194,7 @@ async def _run_ai_turn(
                     attempt_messages,
                     forbidden,
                     required_label=npc.name,
+                    locale=locale,
                 )
                 dialogue, state, nr = _parse_npc_json(content, npc.name)
                 if not dialogue:
@@ -2174,7 +2261,7 @@ async def _run_ai_turn(
             return
     else:
         try:
-            content, guard = await _generate_guarded(messages, forbidden)
+            content, guard = await _generate_guarded(messages, forbidden, locale=locale)
         except Exception as exc:  # noqa: BLE001 — surface as a room error, keep serving
             print(
                 f"[AI-TURN] room={coord.room_id} speaker={ai_label} "
@@ -2193,6 +2280,11 @@ async def _run_ai_turn(
         speaker_label=ai_label,
         content=content,
     )
+    if locale == "ja-JP":
+        content = await _ensure_japanese_text(
+            content,
+            context=f"speaker={ai_label}; room={coord.room_id}",
+        )
 
     # 缓冲→守卫→重流：客户端永远看不到被冒充的文本。先落库拿真 seq 再流。
     msg = await _persist_message(
@@ -2287,6 +2379,7 @@ async def _render_player_character_utterance(
         history = await messages_after(session, coord.room_id, 0, limit=80)
         stats = json.loads(member.stats) if member.stats else default_stats()
         world_card = room.world_card
+        locale = room_locale(room)
 
     npcs = (
         [n for n in all_active if not n.scene or n.scene == current_scene]
@@ -2340,7 +2433,12 @@ async def _render_player_character_utterance(
         data = await agent.run(
             "player_utterance",
             input=(
-                f"角色名：{member.character_name}\n"
+                (
+                    f"{language_instruction(locale)}\n"
+                    if language_instruction(locale)
+                    else ""
+                )
+                + f"角色名：{member.character_name}\n"
                 f"角色卡：{member.persona or '（无）'}\n"
                 f"角色状态：{json.dumps(stats, ensure_ascii=False)}\n"
                 f"当前场景：{current_scene or '自由场景'}\n"
@@ -2350,6 +2448,7 @@ async def _render_player_character_utterance(
                 f"真人玩家输入：{raw_content}"
                 f"{payment_note}" + (f"\n\n{lore}" if lore else "")
             ),
+            locale=locale,
         )
         data = data if isinstance(data, dict) else {}
         rendered = str(data.get("content") or "").strip()
@@ -2461,25 +2560,42 @@ async def _handle_god_whisper(
         moves: list[dict[str, str]] = []
         if target_names:
             # 结构化模式：前端已选好目标 NPC / 场景 / 动作
-            confirm = f"上帝意志已压入「{'/'.join(target_names)}」"
+            is_ja = room is not None and room_locale(room) == "ja-JP"
+            confirm = (
+                f"神の意思を「{'/'.join(target_names)}」に刻み込みました"
+                if is_ja
+                else f"上帝意志已压入「{'/'.join(target_names)}」"
+            )
             if dest_scene:
                 for tn in target_names:
                     moves.append({"npc": tn, "scene": dest_scene})
-                confirm += f"，目标场景：{dest_scene}"
-            narration = action or content or "上帝施加了暗中影响"
-            directive = action or content or "执行上帝的意志"
+                confirm += (
+                    f"。移動先：{dest_scene}" if is_ja else f"，目标场景：{dest_scene}"
+                )
+            narration = action or content or (
+                "神が密かな影響を与えた" if is_ja else "上帝施加了暗中影响"
+            )
+            directive = action or content or (
+                "神の意思を実行する" if is_ja else "执行上帝的意志"
+            )
             if dest_scene:
-                confirm += f"，前往{dest_scene}"
+                confirm += f"。{dest_scene}へ向かいます" if is_ja else f"，前往{dest_scene}"
         else:
             # 旧版自由文本模式：AI 解析 JSON
             try:
                 ai_data = await agent.run(
                     "god_whisper",
                     input=(
-                        f"当前场景：{current_scene or '自由场景'}\n"
+                        (
+                            f"{language_instruction(room_locale(room))}\n"
+                            if room is not None and language_instruction(room_locale(room))
+                            else ""
+                        )
+                        + f"当前场景：{current_scene or '自由场景'}\n"
                         f"当前 NPC：\n{npc_lines}\n\n"
                         f"玩家私聊上帝的指令：{content}"
                     ),
+                    locale=room_locale(room) if room is not None else None,
                 )
                 ai_data = ai_data if isinstance(ai_data, dict) else {}
             except Exception:
@@ -2582,6 +2698,7 @@ async def _handle_pay_npc(
                 )
                 return
             current_scene = await ensure_room_scene(session, room)
+            locale = room_locale(room)
             current = json.loads(member.stats) if member.stats else default_stats()
             money = int(current.get("金钱", 0) or 0)
             if amount > money:
@@ -2603,6 +2720,8 @@ async def _handle_pay_npc(
             await session.commit()
 
         pay_text = f"（{player_name}取出 {amount} 银币，递给{npc_name}。）"
+        if locale == "ja-JP":
+            pay_text = f"（{player_name}は銀貨 {amount} 枚を取り出し、{npc_name}に差し出した。）"
         player_msg = await _persist_message(
             room_id=coord.room_id,
             author_type="user",
@@ -2635,7 +2754,12 @@ async def _handle_pay_npc(
             response = await agent.run(
                 "pay_npc",
                 input=(
-                    f"你是 NPC「{npc_name}」。\n"
+                    (
+                        f"{language_instruction(locale)}\n"
+                        if language_instruction(locale)
+                        else ""
+                    )
+                    + f"你是 NPC「{npc_name}」。\n"
                     f"当前场景：{current_scene or '自由场景'}\n"
                     f"付款人：{player_name}"
                     f"（{player_persona or '无额外设定'}）\n"
@@ -2643,6 +2767,7 @@ async def _handle_pay_npc(
                     f"交易：{player_name}支付给你 {amount} 银币。\n"
                     f"最近场面：\n{recent}"
                 ),
+                locale=locale,
             )
             response, _violated = sanitize(response, [player_name, *other_npc_names])
             if _has_wrong_required_speaker(response, npc_name):
@@ -2651,7 +2776,16 @@ async def _handle_pay_npc(
                 response = _strip_required_speaker_prefix(response, npc_name)
         except Exception:  # noqa: BLE001
             response = ""
-        response = response.strip() or f"{npc_name}收下了 {amount} 银币。"
+        response = response.strip() or (
+            f"{npc_name}は銀貨 {amount} 枚を受け取った。"
+            if locale == "ja-JP"
+            else f"{npc_name}收下了 {amount} 银币。"
+        )
+        if locale == "ja-JP":
+            response = await _ensure_japanese_text(
+                response,
+                context=f"payment response; speaker={npc_name}",
+            )
         npc_msg = await _persist_message(
             room_id=coord.room_id,
             author_type="ai",
@@ -3188,6 +3322,7 @@ async def _judge_world_event_plan(
         world_card = room.world_card
         current_scene = await ensure_room_scene(session, room)
         scene_meta = room.scenes_meta
+        locale = room_locale(room)
 
     # 场景分区：只让当前场景（或随队 scene=None）的 NPC 参与本拍。
     # 自由世界（current_scene==""）不分区，全员在场。
@@ -3243,6 +3378,7 @@ async def _judge_world_event_plan(
         known_scenes=known_scenes,
         world_lore=world_lore,
         scene_context=scene_context,
+        locale=locale,
     )
     return plan, current_scene, npcs
 
@@ -3898,6 +4034,7 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
         if room is None:
             await _set_ai_busy(coord, False)
             return
+        locale = room_locale(room)
         old = room.current_scene or ""
         if dest == old:
             await _set_ai_busy(coord, False)
@@ -3974,14 +4111,28 @@ async def _handle_goto_scene(coord: RoomCoordinator, dest: str) -> None:
         try:
             text = await agent.run(
                 "goto_scene",
-                input=ask + (f"\n\n{lore}" if lore else ""),
+                input=(
+                    (f"{language_instruction(locale)}\n" if language_instruction(locale) else "")
+                    + ask
+                    + (f"\n\n{lore}" if lore else "")
+                ),
+                locale=locale,
             )
         except Exception:
             text = ""
     finally:
         await _set_ai_busy(coord, False)
 
-    text = (text or "").strip() or f"{party}来到了「{dest}」。"
+    text = (text or "").strip() or (
+        f"{party}は「{dest}」に到着した。"
+        if locale == "ja-JP"
+        else f"{party}来到了「{dest}」。"
+    )
+    if locale == "ja-JP":
+        text = await _ensure_japanese_text(
+            text,
+            context=f"scene transition to {dest}",
+        )
 
     msg = await _persist_message(
         room_id=coord.room_id,
@@ -4058,6 +4209,7 @@ async def _handle_move(
         room = await session.get(Room, coord.room_id)
         if room is None:
             return
+        locale = room_locale(room)
         current_scene = room.current_scene or "自由场景"
         if dest == current_scene:
             await coord.broadcast(
@@ -4088,11 +4240,17 @@ async def _handle_move(
                 {n: nps_map[n] for n in candidates},
                 current_scene,
                 dest,
+                locale=locale,
             )
             if not agree:
                 # 拒绝：生成系统消息 + 各 NPC 拒绝旁白
                 lines = "\n".join(f"{n}：{r}" for n, r in refusals)
-                await _broadcast_system(coord, f"🚫 移动被拒绝｜{dest}\n{lines}")
+                title = (
+                    f"🚫 移動を拒否｜{dest}"
+                    if locale == "ja-JP"
+                    else f"🚫 移动被拒绝｜{dest}"
+                )
+                await _broadcast_system(coord, f"{title}\n{lines}")
                 # 让拒绝的 NPC 各自说一句话
                 for n, r in refusals:
                     npc = nps_map.get(n)
@@ -4125,7 +4283,14 @@ async def _handle_move(
         await session.commit()
     await coord.broadcast({"type": "scene", "scene": dest})
     await coord.broadcast({"type": "cards_changed"})
-    await _broadcast_system(coord, f"🚶 玩家带人移动｜{current_scene} → {dest}")
+    await _broadcast_system(
+        coord,
+        (
+            f"🚶 プレイヤー移動｜{current_scene} → {dest}"
+            if locale == "ja-JP"
+            else f"🚶 玩家带人移动｜{current_scene} → {dest}"
+        ),
+    )
     await _broadcast_scene_npcs(coord, dest)
     await _record_scene_log(
         coord,
@@ -4141,6 +4306,8 @@ async def _judge_npc_move_consent(
     npc_map: dict[str, Any],
     current_scene: str,
     dest: str,
+    *,
+    locale: str | None = None,
 ) -> tuple[bool, list[tuple[str, str]]]:
     """AI 裁判：各 NPC 是否同意跟玩家去目标场景。
     返回 (all_agree, [(name, reason), ...])。"""
@@ -4150,16 +4317,18 @@ async def _judge_npc_move_consent(
         for n in npc_names
     )
     prompt = (
-        f"玩家想从「{current_scene}」前往「{dest}」，并希望以下 NPC 同行。\n"
+        (f"{language_instruction(locale)}\n" if language_instruction(locale) else "")
+        + f"玩家想从「{current_scene}」前往「{dest}」，并希望以下 NPC 同行。\n"
         f"请为每个 NPC 判定是否愿意去"
         "（考虑性格、当前事务、与玩家的关系）：\n"
         f"{lines}\n\n"
         "只输出 JSON 数组，不要多余文字：\n"
         '[{"name": "NPC名", "agree": true, "reason": "简短理由（10字内）"}]\n'
         "如果 NPC 不愿意，agree 为 false。"
+        + ("reason は短い日本語にしてください。" if normalize_locale(locale) == "ja-JP" else "")
     )
     try:
-        decisions = await agent.run("npc_move_consent", input=prompt)
+        decisions = await agent.run("npc_move_consent", input=prompt, locale=locale)
     except Exception:
         return True, []  # AI 调用失败时默认同意，不让移动卡死
 
@@ -4170,7 +4339,8 @@ async def _judge_npc_move_consent(
         name = d.get("name", "")
         agree = d.get("agree", True)
         if not agree:
-            refusals.append((name, d.get("reason", "不想去")))
+            fallback = "行きたくない" if normalize_locale(locale) == "ja-JP" else "不想去"
+            refusals.append((name, d.get("reason", fallback)))
     return len(refusals) == 0, refusals
 
 
@@ -5421,6 +5591,7 @@ async def _judge_and_apply_stats(
 @router.websocket("/ws/rooms/{room_id}")
 async def room_ws(websocket: WebSocket, room_id: int) -> None:
     token = websocket.query_params.get("token", "")
+    query_locale = normalize_locale(websocket.query_params.get("locale"))
     async with SessionFactory() as session:
         user = await user_from_token(session, token) if token else None
         if user is None:
@@ -5437,6 +5608,11 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
             return
         room = await session.get(Room, room_id)
         if room is not None:
+            next_mode = locale_ai_mode(query_locale)
+            if room.ai_mode != next_mode:
+                room.ai_mode = next_mode
+                await session.commit()
+                await session.refresh(room)
             await ensure_room_scene(session, room)
         history = await messages_after(session, room_id, 0, limit=200)
 
@@ -5466,6 +5642,7 @@ async def room_ws(websocket: WebSocket, room_id: int) -> None:
         while True:
             data = await websocket.receive_json()
             kind = data.get("type")
+            await _sync_room_locale_from_payload(room_id, data)
             if kind == "say":
                 raw_content = str(data.get("content", ""))
                 async with coord.lock:

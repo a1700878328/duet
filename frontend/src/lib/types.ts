@@ -415,14 +415,14 @@ export type WsServerEvent =
   | WsError;
 
 export type WsClientEvent =
-  | { type: "say"; content: string }
-  | { type: "polish_say"; content: string }
-  | { type: "advance"; npc_id?: number }
-  | { type: "timeskip" }
-  | { type: "goto_scene"; scene: string }
-  | { type: "describe_scene" }
-  | { type: "god_whisper"; content: string; target_npcs?: string[]; scene?: string; action?: string }
-  | { type: "pay_npc"; npc_id: number; amount: number }
+  | { type: "say"; content: string; locale?: string }
+  | { type: "polish_say"; content: string; locale?: string }
+  | { type: "advance"; npc_id?: number; locale?: string }
+  | { type: "timeskip"; locale?: string }
+  | { type: "goto_scene"; scene: string; locale?: string }
+  | { type: "describe_scene"; locale?: string }
+  | { type: "god_whisper"; content: string; target_npcs?: string[]; scene?: string; action?: string; locale?: string }
+  | { type: "pay_npc"; npc_id: number; amount: number; locale?: string }
   | {
       type: "image";
       custom_prompt?: string;
@@ -430,9 +430,10 @@ export type WsClientEvent =
       designed_appearance?: string;
       nsfw?: boolean;
       quality?: "fast" | "refined";
+      locale?: string;
     }
-  | { type: "typing"; is_typing: boolean }
-  | { type: "move"; scene: string; npcs: string[] };
+  | { type: "typing"; is_typing: boolean; locale?: string }
+  | { type: "move"; scene: string; npcs: string[]; locale?: string };
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
 

@@ -5,6 +5,7 @@ import type {
   SceneLogEntry,
   SceneLogResponse,
 } from "../lib/types";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   open: boolean;
@@ -71,11 +72,11 @@ function statDisplay(value: unknown): string {
   return "—";
 }
 
-function groupNpcsByScene(npcs: NpcCard[], currentScene: string) {
+function groupNpcsByScene(npcs: NpcCard[], currentScene: string, fallbackScene: string) {
   const groups = new Map<string, NpcCard[]>();
   for (const npc of npcs) {
     if (npc.name === "上帝") continue;
-    const scene = npc.scene || currentScene || "随队";
+    const scene = npc.scene || currentScene || fallbackScene;
     const group = groups.get(scene) ?? [];
     group.push(npc);
     groups.set(scene, group);
@@ -106,6 +107,7 @@ export function WorldStatusPanel({
   onRefresh,
   loading,
 }: Props) {
+  const { t } = useI18n();
   const npcs = cards?.npcs ?? [];
   const players = cards?.players ?? [];
   const scenes = sceneLog?.scenes?.length
@@ -113,10 +115,12 @@ export function WorldStatusPanel({
     : currentScene
       ? [currentScene]
       : [];
-  const npcGroups = groupNpcsByScene(npcs, currentScene);
+  const npcGroups = groupNpcsByScene(npcs, currentScene, t("followerScene"));
   const recent = recentWorldEntries(sceneLog);
   const risks = riskSignals(myStats);
   const states = statusTexts(myStats);
+  const displayScene = (value: string) =>
+    !value || value === "自由场景" ? t("freeScene") : value;
 
   return (
     <>
@@ -130,15 +134,15 @@ export function WorldStatusPanel({
         aria-hidden={!open}
       >
         <div className="card-panel-head">
-          <h3>世界状态</h3>
+          <h3>{t("worldStatus")}</h3>
           <div className="world-head-actions">
             <button className="btn btn-sm" onClick={onRefresh} disabled={loading}>
-              刷新
+              {t("refresh")}
             </button>
             <button
               className="btn btn-ghost card-panel-close"
               onClick={onClose}
-              aria-label="关闭"
+              aria-label={t("close")}
             >
               ✕
             </button>
@@ -148,23 +152,23 @@ export function WorldStatusPanel({
         <div className="card-panel-body world-body">
           <section className="world-overview">
             <div className="world-metric">
-              <span>时间</span>
+              <span>{t("time")}</span>
               <strong>{timeLabel}</strong>
             </div>
             <div className="world-metric">
-              <span>当前地点</span>
-              <strong>{currentScene || "自由场景"}</strong>
+              <span>{t("currentLocation")}</span>
+              <strong>{currentScene || t("freeScene")}</strong>
             </div>
             <div className="world-metric">
-              <span>人物</span>
-              <strong>{players.length} 玩家 / {npcs.filter((n) => n.name !== "上帝").length} NPC</strong>
+              <span>{t("people")}</span>
+              <strong>{t("playersCount", { players: players.length, npcs: npcs.filter((n) => n.name !== "上帝").length })}</strong>
             </div>
           </section>
 
           <section className="world-section">
             <div className="world-section-head">
-              <h4>地点与 NPC</h4>
-              {loading && <span>同步中…</span>}
+              <h4>{t("locationAndNpcs")}</h4>
+              {loading && <span>{t("syncing")}</span>}
             </div>
             <div className="world-scene-list">
               {scenes.map((scene) => {
@@ -176,8 +180,8 @@ export function WorldStatusPanel({
                     key={scene}
                   >
                     <div className="world-scene-row">
-                      <strong>{scene}</strong>
-                      <span>{sceneActivity(sceneLog, scene)} 记录</span>
+                      <strong>{displayScene(scene)}</strong>
+                      <span>{t("recordsCount", { count: sceneActivity(sceneLog, scene) })}</span>
                     </div>
                     <div className="world-npc-pills">
                       {sceneNpcs.length ? (
@@ -187,7 +191,7 @@ export function WorldStatusPanel({
                           </span>
                         ))
                       ) : (
-                        <em>暂无可见 NPC</em>
+                        <em>{t("noVisibleNpc")}</em>
                       )}
                     </div>
                   </div>
@@ -198,7 +202,7 @@ export function WorldStatusPanel({
 
           <section className="world-section">
             <div className="world-section-head">
-              <h4>后台动向</h4>
+              <h4>{t("backgroundMoves")}</h4>
             </div>
             <div className="world-feed">
               {recent.length ? (
@@ -213,30 +217,30 @@ export function WorldStatusPanel({
                   </div>
                 ))
               ) : (
-                <div className="world-empty">还没有后台动向。</div>
+                <div className="world-empty">{t("noBackgroundMoves")}</div>
               )}
             </div>
           </section>
 
           <section className="world-section">
             <div className="world-section-head">
-              <h4>{characterName ? `${characterName} · 走向` : "角色走向"}</h4>
+              <h4>{characterName ? t("characterDirectionNamed", { name: characterName }) : t("characterDirection")}</h4>
             </div>
             <div className="world-risk-grid">
               <div className="world-risk-card">
-                <span>金钱</span>
+                <span>{t("money")}</span>
                 <strong>{statDisplay(myStats?.金钱)}</strong>
               </div>
               <div className="world-risk-card">
-                <span>意志</span>
+                <span>{t("will")}</span>
                 <strong>{statDisplay(myStats?.意志)}</strong>
               </div>
               <div className="world-risk-card">
-                <span>淫乱</span>
+                <span>{t("lust")}</span>
                 <strong>{statDisplay(myStats?.淫乱)}</strong>
               </div>
               <div className="world-risk-card">
-                <span>负债</span>
+                <span>{t("debt")}</span>
                 <strong>{statDisplay(myStats?.负债 ?? 0)}</strong>
               </div>
             </div>
@@ -244,7 +248,7 @@ export function WorldStatusPanel({
               {risks.length ? (
                 risks.map((risk) => <span key={risk}>{risk}</span>)
               ) : (
-                <em>暂无明显结局风险</em>
+                <em>{t("noEndingRisk")}</em>
               )}
             </div>
             {states.length > 0 && (

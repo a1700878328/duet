@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, assetUrl } from "../lib/api";
 import { MEDIA_GENERATION_ENABLED } from "../lib/features";
+import { useI18n } from "../lib/i18n";
 import type { CharDraft, NpcCard, UserCharacterCard } from "../lib/types";
 
 interface Props {
@@ -14,6 +15,7 @@ type Mode = "browse" | "describe";
 // Full-screen character selector. Slow AI drafts/portraits are opt-in so room
 // creation stays fast for quick two-player sessions.
 export function CharacterSelect({ roomId, onDone }: Props) {
+  const { locale, t } = useI18n();
   const [drafts, setDrafts] = useState<CharDraft[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,22 +44,23 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         const result = await api.characterOptions(roomId, {
           ...body,
           nsfw: body.nsfw ?? draftNsfw,
+          locale,
         });
         if (id !== reqId.current) return; // superseded
         if (!result.length) {
-          setError("AI 这次没有生成候选。再点一次，或直接自己描述进场。");
+          setError(t("charNoCandidates"));
         }
         setDrafts(result);
         setMode("browse");
       } catch (err) {
         if (id !== reqId.current) return;
-        setError(err instanceof ApiError ? err.message : "生成角色失败");
+        setError(err instanceof ApiError ? err.message : t("charGenerateFailed"));
         setDrafts([]);
       } finally {
         if (id === reqId.current) setLoading(false);
       }
     },
-    [draftNsfw, roomId],
+    [draftNsfw, locale, roomId, t],
   );
 
   useEffect(() => {
@@ -110,7 +113,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       });
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "选择角色失败");
+      setError(err instanceof ApiError ? err.message : t("charPickFailed"));
       setPicking(null);
     }
   }
@@ -134,7 +137,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       });
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "选择角色失败");
+      setError(err instanceof ApiError ? err.message : t("charPickFailed"));
       setPicking(null);
     }
   }
@@ -159,7 +162,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       await api.setNpcActive(roomId, npc.id, false);
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "选择角色失败");
+      setError(err instanceof ApiError ? err.message : t("charPickFailed"));
       setPicking(null);
     }
   }
@@ -183,7 +186,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       });
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "读取账号角色失败");
+      setError(err instanceof ApiError ? err.message : t("charLoadAccountFailed"));
       setPicking(null);
     }
   }
@@ -193,7 +196,11 @@ export function CharacterSelect({ roomId, onDone }: Props) {
     if (!hint.trim()) return;
     setPicking(null);
     setError(null);
-    const namePart = customName.trim() ? `角色名倾向：${customName.trim()}。` : "";
+    const namePart = customName.trim()
+      ? locale === "ja-JP"
+        ? `希望キャラ名：${customName.trim()}。`
+        : `角色名倾向：${customName.trim()}。`
+      : "";
     void fetchOptions({ count: 3, hint: `${namePart}${hint.trim()}`, nsfw: draftNsfw });
   }
 
@@ -217,17 +224,17 @@ export function CharacterSelect({ roomId, onDone }: Props) {
       <div className="char-select-box">
         <header className="char-select-head">
           <div>
-            <h2>选择你的角色</h2>
+            <h2>{t("charSelectTitle")}</h2>
             <p className="muted">
-              可以直接扮演世界角色，也可以稍后让 AI 生成原创角色参考图，再自动裁出头像。
+              {t("charSelectIntro")}
             </p>
           </div>
           <button
             className="btn btn-ghost char-select-skip"
             onClick={() => void onDone()}
-            title="先用默认设定进场，之后可在「🎭 角色」里修改"
+            title={t("charSkipTitle")}
           >
-            用默认/跳过
+            {t("charSkip")}
           </button>
         </header>
 
@@ -236,16 +243,16 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         {loading && (
           <p className="muted char-select-hint">
             {MEDIA_GENERATION_ENABLED
-              ? "✨ 正在生成角色与参考图…（较慢，约需 1–2 分钟，请稍候）"
-              : "✨ 正在生成角色草稿…（生图已关闭，可直接选择文字角色卡）"}
+              ? t("charGeneratingMedia")
+              : t("charGeneratingText")}
           </p>
         )}
 
         {libraryCards.length > 0 && (
           <section className="char-select-section">
             <div className="char-select-section-head">
-              <h3>账号角色库</h3>
-              <span className="muted">跨房间和世界卡永久保存</span>
+              <h3>{t("accountLibrary")}</h3>
+              <span className="muted">{t("accountLibraryHint")}</span>
             </div>
             <div
               className={`char-select-grid ${
@@ -263,14 +270,14 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="char-card-noart muted">（暂无参考图）</div>
+                        <div className="char-card-noart muted">{t("noReferenceImage")}</div>
                       )}
                     </div>
                   )}
                   <div className="char-card-body">
                     <div className="char-card-name">
                       {card.name}
-                      <span className="tag">账号卡</span>
+                      <span className="tag">{t("accountCard")}</span>
                     </div>
                     <div className="char-card-persona muted">{card.persona}</div>
                     <button
@@ -281,10 +288,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                       {picking === -3 ? (
                         <>
                           <span className="spinner" />
-                          读取中…
+                          {t("loadingCard")}
                         </>
                       ) : (
-                        "读取此角色"
+                        t("loadThisCharacter")
                       )}
                     </button>
                   </div>
@@ -297,8 +304,8 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         {protagonist && (
           <section className="char-select-section">
             <div className="char-select-section-head">
-              <h3>原作主角</h3>
-              <span className="muted">该世界卡的默认主角</span>
+              <h3>{t("canonProtagonist")}</h3>
+              <span className="muted">{t("canonProtagonistHint")}</span>
             </div>
             <div
               className={`char-select-grid ${
@@ -315,14 +322,14 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                         loading="lazy"
                       />
                     ) : (
-                      <div className="char-card-noart muted">（暂无默认图）</div>
+                      <div className="char-card-noart muted">{t("noDefaultImage")}</div>
                     )}
                   </div>
                 )}
                 <div className="char-card-body">
                   <div className="char-card-name">
                     {protagonist.name}
-                    <span className="tag tag-accent">主角</span>
+                    <span className="tag tag-accent">{t("protagonist")}</span>
                   </div>
                   <div className="char-card-persona muted">
                     {protagonist.persona}
@@ -335,10 +342,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                     {picking === -4 ? (
                       <>
                         <span className="spinner" />
-                        进场中…
+                        {t("entering")}
                       </>
                     ) : (
-                      "扮演她"
+                      t("playHer")
                     )}
                   </button>
                 </div>
@@ -350,9 +357,9 @@ export function CharacterSelect({ roomId, onDone }: Props) {
         {presetCharacters.length > 0 && (
           <section className="char-select-section">
             <div className="char-select-section-head">
-              <h3>世界角色</h3>
+              <h3>{t("worldCharacters")}</h3>
               <span className="muted">
-                来自当前世界卡的重要 NPC · 共 {presetCharacters.length} 个
+                {t("worldCharactersHint", { count: presetCharacters.length })}
               </span>
             </div>
             <div
@@ -371,14 +378,14 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="char-card-noart muted">（暂无默认图）</div>
+                        <div className="char-card-noart muted">{t("noDefaultImage")}</div>
                       )}
                     </div>
                   )}
                   <div className="char-card-body">
                     <div className="char-card-name">
                       {npc.name}
-                      <span className="tag">世界角色</span>
+                      <span className="tag">{t("worldCharacter")}</span>
                     </div>
                     <div className="char-card-persona muted">{npc.persona}</div>
                     <button
@@ -389,10 +396,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                       {picking === -2 ? (
                         <>
                           <span className="spinner" />
-                          进场中…
+                          {t("entering")}
                         </>
                       ) : (
-                        "扮演 TA"
+                        t("playThem")
                       )}
                     </button>
                   </div>
@@ -404,8 +411,8 @@ export function CharacterSelect({ roomId, onDone }: Props) {
 
         <section className="char-select-section">
           <div className="char-select-section-head">
-            <h3>原创角色</h3>
-            <span className="muted">按需生成，参考图会比较慢</span>
+            <h3>{t("originalCharacter")}</h3>
+            <span className="muted">{t("originalCharacterHint")}</span>
           </div>
           {loading || drafts.length > 0 ? (
             <div
@@ -424,7 +431,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                           loading="lazy"
                         />
                       ) : draft ? (
-                        <div className="char-card-noart muted">（暂无参考图）</div>
+                        <div className="char-card-noart muted">{t("noReferenceImage")}</div>
                       ) : (
                         <div className="char-card-skeleton">
                           <span className="spinner spinner-dark" />
@@ -455,10 +462,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
                         {picking === i ? (
                           <>
                             <span className="spinner" />
-                            进场中…
+                            {t("entering")}
                           </>
                         ) : (
-                          "选图并生成头像"
+                          t("pickImageAndAvatar")
                         )}
                       </button>
                     )}
@@ -468,7 +475,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
             </div>
           ) : (
             <div className="char-select-empty muted">
-              还没有原创候选。点击「AI 发散一批」时才会开始生成角色和参考图。
+              {t("noOriginalCandidates")}
             </div>
           )}
         </section>
@@ -477,7 +484,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
           <form className="char-select-describe" onSubmit={submitHint}>
             <input
               className="input"
-              placeholder="角色名，例如：莉娜"
+              placeholder={t("characterNamePlaceholder")}
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
               autoFocus
@@ -485,7 +492,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
             />
             <input
               className="input"
-              placeholder="角色描述，例如：一名失忆的流浪剑士，沉默寡言"
+              placeholder={t("characterDescriptionPlaceholder")}
               value={hint}
               onChange={(e) => setHint(e.target.value)}
               disabled={picking !== null || loading}
@@ -506,10 +513,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               {loading ? (
                 <>
                   <span className="spinner" />
-                  生成候选中…
+                  {t("generatingCandidates")}
                 </>
               ) : (
-                "生成 3 个候选"
+                t("generateCandidates")
               )}
             </button>
             <button
@@ -518,7 +525,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               onClick={() => setMode("browse")}
               disabled={picking !== null || loading}
             >
-              取消
+              {t("cancel")}
             </button>
           </form>
         ) : (
@@ -533,10 +540,10 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               {loading ? (
                 <>
                   <span className="spinner spinner-dark" />
-                  AI 发散中…
+                  {t("aiDiverging")}
                 </>
               ) : (
-                "🎲 AI 随机生成"
+                t("aiRandomGenerate")
               )}
             </button>
             <button
@@ -548,7 +555,7 @@ export function CharacterSelect({ roomId, onDone }: Props) {
               }}
               disabled={picking !== null}
             >
-              ✍️ 按描述生成
+              {t("generateByDescription")}
             </button>
             <label className="npc-check-item">
               <input

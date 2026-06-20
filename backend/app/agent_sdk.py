@@ -24,6 +24,7 @@ from .agent_schemas import (
     AgentSchema,
 )
 from .brain import AGENT_PROFILES, AgentProfile, provider_from_profile
+from .i18n import language_instruction, normalize_locale
 from .json_utils import parse_json_array, parse_json_object
 from .prompts import _NSFW_DIRECTIVE
 
@@ -535,6 +536,18 @@ TASKS: dict[str, AgentTask] = {
             "如果有世界设定片段，必须贴合这些片段。"
         ),
     ),
+    # ---- Japanese localization fallback ----
+    "localize_to_japanese": AgentTask(
+        name="localize_to_japanese",
+        profile=AGENT_PROFILES["default"],
+        jailbreak=True,
+        system_prompt=(
+            "あなたはゲーム本文の日本語ローカライズ担当です。"
+            "入力された中国語または混在テキストを、自然な日本語のゲーム本文に翻訳してください。"
+            "固有名詞、話者名、数値、記号、段落構造、口調、成人向け/暗黒ファンタジーの強さは維持します。"
+            "説明や注釈を付けず、翻訳後の本文だけを出力してください。"
+        ),
+    ),
     # ---- Evolve persona (角色人设演化) ----
     "evolve_persona": AgentTask(
         name="evolve_persona",
@@ -757,6 +770,7 @@ class AgentSDK:
         *,
         input: str | None = None,
         messages: list[dict[str, str]] | None = None,
+        locale: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """Run one AI task by name.
@@ -774,6 +788,7 @@ class AgentSDK:
 
         brain = provider_from_profile(task_name, task.profile)
         system = task.system_prompt
+        locale_note = language_instruction(normalize_locale(locale))
 
         # Inject tutorial
         if task.tutorial_name:
@@ -784,10 +799,17 @@ class AgentSDK:
         # Inject jailbreak
         if task.jailbreak:
             system = f"{_NSFW_DIRECTIVE}\n\n{system}"
+        if locale_note:
+            system = f"{system}\n\n{locale_note}"
 
         # Build messages
         if messages is not None:
-            msgs = messages
+            msgs = list(messages)
+            if locale_note:
+                idx = 0
+                while idx < len(msgs) and msgs[idx].get("role") == "system":
+                    idx += 1
+                msgs.insert(idx, {"role": "system", "content": locale_note})
         elif input is not None:
             if kwargs:
                 input = input.format(**kwargs)

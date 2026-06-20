@@ -1,4 +1,5 @@
 import { assetUrl } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import type { Message } from "../lib/types";
 
 interface Props {
@@ -56,7 +57,12 @@ export function MessageBubble({
   onAvatarClick,
   onImageClick,
 }: Props) {
+  const { t } = useI18n();
   const { author_type, speaker_label, content } = message;
+  const displaySpeaker =
+    speaker_label === "旁白"
+      ? t("narratorLabel")
+      : speaker_label || "";
 
   if (author_type === "system") {
     const isNpcMind = content.startsWith("🧠 NPC内心");
@@ -70,16 +76,16 @@ export function MessageBubble({
   if (author_type === "image") {
     return (
       <div className={`bubble-row ${isMe ? "me" : "other"}`}>
-        {!isMe && <div className="speaker">{speaker_label || "场景图"}</div>}
+        {!isMe && <div className="speaker">{displaySpeaker || t("sceneImageLabel")}</div>}
         <button
           type="button"
           className="image-bubble"
           onClick={onImageClick}
-          title="点击查看大图"
+          title={t("viewLargeImage")}
         >
           <img
             src={assetUrl(content)}
-            alt="场景图"
+            alt={t("sceneImageLabel")}
             loading="lazy"
             style={{
               maxWidth: "min(360px, 80vw)",
@@ -95,7 +101,7 @@ export function MessageBubble({
   const isAi = author_type === "ai";
   const rowClass = isMe ? "me" : isAi ? "ai" : "other";
   const variant = isMe ? "me" : isAi ? "ai" : "other";
-  const label = speaker_label || (isAi ? "NPC" : isMe ? "我" : "对方");
+  const label = displaySpeaker || (isAi ? "NPC" : isMe ? t("me") : t("counterpartLabel"));
 
   const avatar = (
     <Avatar
@@ -112,18 +118,18 @@ export function MessageBubble({
       <div className="bubble-col">
         {!isMe && (
           <div className="speaker">
-            {speaker_label || (isAi ? "NPC" : "对方")}
+            {displaySpeaker || (isAi ? "NPC" : t("counterpartLabel"))}
             {isAi && (
               <span className="tag">
-                {speaker_label === "旁白" ? "旁白" : "NPC"}
+                {speaker_label === "旁白" ? t("narratorLabel") : "NPC"}
               </span>
             )}
             {onPlayVoice && (
               <button
                 type="button"
                 onClick={onPlayVoice}
-                title="播放/重播配音"
-                aria-label="播放配音"
+                title={t("playVoice")}
+                aria-label={t("playVoice")}
                 style={{
                   background: "none",
                   border: "none",
@@ -148,8 +154,8 @@ export function MessageBubble({
             <button
               type="button"
               onClick={onPlayVoice}
-              title="播放/重播配音"
-              aria-label="播放配音"
+              title={t("playVoice")}
+              aria-label={t("playVoice")}
               style={{
                 background: "none",
                 border: "none",
