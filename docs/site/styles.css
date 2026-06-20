@@ -177,8 +177,8 @@ img {
 }
 
 .feature-grid p,
-.mind-card p,
-.scene-log-card li {
+.mind-bubble p,
+.scene-record-panel li {
   color: var(--muted);
 }
 
@@ -186,15 +186,15 @@ img {
   max-width: 1180px;
 }
 
-.npc-grid {
+.npc-showcase {
   display: grid;
-  grid-template-columns: 0.82fr 1.18fr;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 18px;
-  align-items: stretch;
+  align-items: start;
 }
 
-.character-board,
-.npc-console {
+.timeline-card,
+.scene-record-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
   background:
@@ -202,98 +202,122 @@ img {
     var(--panel);
 }
 
-.character-board {
-  display: grid;
-  gap: 14px;
-  align-content: center;
+.timeline-card {
   padding: 22px;
 }
 
-.character-card {
+.mind-bubble {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  border: 1px solid rgba(141, 76, 255, 0.62);
+  border-radius: 8px;
+  background: rgba(90, 48, 145, 0.22);
+}
+
+.mind-bubble strong {
+  display: block;
+  color: #d8caff;
+  font-size: 17px;
+}
+
+.mind-bubble p {
+  margin: 8px 0 0;
+  font-size: 17px;
+}
+
+.timeline-row {
   display: grid;
-  grid-template-columns: 74px 1fr;
+  grid-template-columns: 68px minmax(0, 1fr);
   gap: 16px;
-  align-items: center;
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  align-items: end;
+  margin: 0 0 24px;
+}
+
+.timeline-row img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255, 211, 106, 0.48);
+  box-shadow: 0 0 0 4px rgba(255, 122, 182, 0.12);
+}
+
+.speech span {
+  display: block;
+  margin: 0 0 8px 8px;
+  color: #aaa0be;
+  font-weight: 800;
+}
+
+.speech b {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 9px;
+  border: 1px solid rgba(255, 122, 182, 0.9);
+  border-radius: 999px;
+  color: #ff8fc4;
+  font-size: 13px;
+}
+
+.speech p {
+  margin: 0;
+  padding: 18px 22px;
+  border: 1px solid rgba(255, 122, 182, 0.55);
+  border-radius: 8px;
+  border-top-left-radius: 6px;
+  background: rgba(70, 25, 55, 0.55);
+  color: #fff8ff;
+  font-size: 21px;
+  font-weight: 750;
+  line-height: 1.58;
+}
+
+.player-speech p {
+  border-color: rgba(85, 224, 163, 0.42);
+  background: rgba(18, 55, 45, 0.45);
+}
+
+.scene-record-panel {
+  padding: 20px;
+  position: sticky;
+  top: 18px;
+}
+
+.scene-record-panel h3 {
+  margin: 0 0 16px;
+  font-size: 24px;
+}
+
+.scene-record-panel div {
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.18);
 }
 
-.character-card img,
-.chat-line img {
-  aspect-ratio: 1;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid rgba(255, 255, 255, 0.18);
-}
-
-.character-card strong {
+.scene-record-panel span {
   display: block;
-  font-size: 20px;
-}
-
-.character-card span {
-  color: var(--accent);
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 800;
-  font-size: 13px;
 }
 
-.npc-console {
-  padding: 22px;
-}
-
-.chat-line {
-  display: grid;
-  grid-template-columns: 54px 1fr;
-  gap: 14px;
-  align-items: start;
-  margin-bottom: 14px;
-}
-
-.chat-line p,
-.mind-card,
-.scene-log-card {
-  margin: 0;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.chat-line.npc p {
-  border-color: rgba(255, 122, 182, 0.45);
-  background: rgba(255, 122, 182, 0.1);
-}
-
-.chat-line b,
-.mind-card b,
-.scene-log-card b {
+.scene-record-panel strong {
   display: block;
-  margin-bottom: 6px;
-  color: var(--gold);
+  margin-top: 4px;
 }
 
-.mind-card {
-  margin: 14px 0;
-  border-color: rgba(85, 224, 163, 0.35);
-}
-
-.scene-log-card ul {
+.scene-record-panel ul {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 16px 0 0;
   padding: 0;
 }
 
-.scene-log-card li {
-  margin: 8px 0;
-}
-
-.scene-log-card span {
-  display: inline-block;
-  min-width: 112px;
-  color: var(--accent-2);
-  font-weight: 800;
+.scene-record-panel li {
+  margin: 10px 0;
+  padding-left: 14px;
+  border-left: 2px solid rgba(85, 224, 163, 0.52);
 }
 
 .dark-band {
@@ -340,7 +364,7 @@ img {
 
   .hero-grid,
   .feature-grid,
-  .npc-grid,
+  .npc-showcase,
   .screens {
     grid-template-columns: 1fr;
   }
@@ -356,5 +380,23 @@ img {
 
   .hero-shot img {
     min-height: 260px;
+  }
+
+  .scene-record-panel {
+    position: static;
+  }
+
+  .timeline-row {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .timeline-row img {
+    width: 46px;
+    height: 46px;
+  }
+
+  .speech p {
+    font-size: 16px;
   }
 }
